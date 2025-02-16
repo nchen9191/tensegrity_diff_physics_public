@@ -465,7 +465,7 @@ class TensegrityRobotSimulator(AbstractSimulator):
 
         return next_state
 
-    def run_until_stable(self, dt, tol=1e-4, max_time=3):
+    def run_until_stable(self, dt, tol=1e-2, max_time=3):
         with torch.no_grad():
             time = 0.0
             curr_state = self.get_curr_state()
@@ -476,7 +476,6 @@ class TensegrityRobotSimulator(AbstractSimulator):
             while (torch.abs(vels) > tol).any():
                 if time > max_time:
                     break
-                #     raise Exception('Stability could not be reached within 5 seconds')
                 self.update_state(curr_state)
                 curr_state = self.step(curr_state, dt)
                 states.append(curr_state.clone())
@@ -487,7 +486,8 @@ class TensegrityRobotSimulator(AbstractSimulator):
                     for i in range(num_bodies)
                 ])
 
-                print(time, torch.abs(vels).max())
+                if time.is_integer():
+                    print(time, torch.abs(vels).max())
 
             self.update_state(curr_state)
 

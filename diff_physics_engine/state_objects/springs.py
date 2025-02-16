@@ -311,7 +311,7 @@ class ActuatedCable(Cable):
         # actuation_length = self.actuation_length + self.dl
         self.actuation_length = torch.clamp_max(actuation_length,
                                                 self._rest_length)
-        self.dl -= actuation_length - self.actuation_length
+        self.dl = self.dl - (actuation_length - self.actuation_length)
 
     def reset_cable(self):
         self.actuation_length = self.init_act_length.clone()

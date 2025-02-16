@@ -476,26 +476,27 @@ class RealTensegrityTrainingEngine(AbstractRealTensegrityTrainingEngine):
             "tol": tol,
             "motor_speed": 0.7
         }
+
     def init_simulator(self):
-        # self.simulator.detach()
-        # self.simulator = TensegrityGNNResidualSimulator(**self.sim_config)
-        # self.simulator.load_state_dict(self.curr_state_dict)
-        self.simulator.curr_graph = None
         self.simulator.reset_actuation()
 
         cables = self.simulator.tensegrity_robot.actuated_cables.values()
         dtype = self.simulator.sys_precision
 
+        # Start end pts slightly above ground to remove penetration instability
         start_endpts = self.gt_end_pts[0]
         for e in start_endpts:
             e[:, 2] += 0.05
 
+        # Initialize cable attachment pts based on starting end pts
         start_endpts_ = [
             [start_endpts[0].detach(), start_endpts[1].detach()],
             [start_endpts[2].detach(), start_endpts[3].detach()],
             [start_endpts[4].detach(), start_endpts[5].detach()],
         ]
         self.simulator.init_by_endpts(start_endpts_)
+
+        # Initialize cable params
         for i, cable in enumerate(cables):
             e0, e1 = cable.end_pts
             e0, e1 = start_endpts[int(e0.split("_")[1])], start_endpts[int(e0.split("_")[2])]
@@ -505,45 +506,41 @@ class RealTensegrityTrainingEngine(AbstractRealTensegrityTrainingEngine):
             cable.motor.speed = torch.tensor(self.data_json[0]['pid']['motor_speed'], dtype=dtype)
             cable.motor.motor_state.omega_t = torch.tensor(0., dtype=dtype)
 
+        # Initialize pid params
+        pid_params = self.data_json[0]['pid']
         for pid in self.simulator.pids.values():
-            pid_params = self.data_json[0]['pid']
             pid.min_length = torch.tensor(pid_params['min_length'], dtype=dtype)
             pid.RANGE = torch.tensor(pid_params['RANGE'], dtype=dtype)
             pid.tol = torch.tensor(pid_params['tol'], dtype=dtype)
             pid.k_p = 10
-        # self.start_state = self.simulator.get_curr_state().clone()
-        if self.curr_dataset_name not in self.start_states_dict:
-            # self.simulator.max_correction_norm = 1e-12
-            robot = deepcopy(self.simulator.tensegrity_robot)
-            sim = TensegrityRobotSimulator(robot,
-                                           self.simulator.gravity,
-                                           self.sim_config['contact_params'],
-                                           self.simulator.sys_precision)
 
-            for c in sim.tensegrity_robot.actuated_cables.values():
+
+        if self.curr_dataset_name not in self.start_states_dict:
+            robot = deepcopy(self.simulator.tensegrity_robot)
+
+            # Instantiate dummy sim to get stable starting state
+            dummy_sim = TensegrityRobotSimulator(
+                robot,
+                self.simulator.gravity,
+                self.sim_config['contact_params'],
+                self.simulator.sys_precision
+            )
+
+            for c in dummy_sim.tensegrity_robot.actuated_cables.values():
                 c.motor.speed = torch.tensor(0.1, dtype=torch.float64)
 
-            for p in sim.pids.values():
+            for p in dummy_sim.pids.values():
                 p.tol = torch.tensor(0.01, dtype=torch.float64)
                 p.min_length = torch.tensor(1.0, dtype=torch.float64)
                 p.RANGE = torch.tensor(1.0, dtype=torch.float64)
                 p.k_p = 10
 
-            sim.init_by_endpts(start_endpts_)
+            dummy_sim.init_by_endpts(start_endpts_)
 
-            # sim.grad_descent_rest_lengths()
-            curr_state, all_states = sim.run_until_stable(max_time=30, dt=0.001, tol=1e-2)
-            frames = [{'time': i * 0.01, 'pos': s.reshape(-1, 13)[:, :7].flatten().numpy()}
-                      for i, s in enumerate(all_states)]
-
-            # visualizer = MuJoCoVisualizer()
-            # visualizer.set_xml_path(Path("mujoco_physics_engine/xml_models/3prism_real_upscaled_vis.xml"))
-            # visualizer.data = frames
-            # visualizer.set_camera("camera")
-            # visualizer.visualize(Path(f"/Users/nelsonchen/Desktop/vid.mp4"), 0.01)
+            curr_state, all_states = dummy_sim.run_until_stable(max_time=30, dt=0.001, tol=1e-2)
 
             target_gaits = {}
-            for i, s in enumerate(sim.tensegrity_robot.actuated_cables.values()):
+            for i, s in enumerate(dummy_sim.tensegrity_robot.actuated_cables.values()):
                 e0, e1 = s.end_pts
                 e0, e1 = int(e0.split("_")[1]), int(e0.split("_")[2])
                 cable_length = (start_endpts[e1] - start_endpts[e0]).norm(dim=1, keepdim=True)
@@ -551,39 +548,25 @@ class RealTensegrityTrainingEngine(AbstractRealTensegrityTrainingEngine):
                 gait = (cable_length.item() - pid_params['min_length']) / pid_params['RANGE']
                 target_gaits[f'spring_{i}'] = gait
 
-            states, _ = sim.run_target_gait(0.001, curr_state, target_gaits)
-            sim.update_state(states[-1])
-
-            print(states[-1].flatten().numpy().tolist())
+            states, _ = dummy_sim.run_target_gait(0.001, curr_state, target_gaits)
+            dummy_sim.update_state(states[-1])
 
             tensegrity_left_mid = torch.vstack([e[0] for e in start_endpts_]).mean(dim=0, keepdim=True)
             tensegrity_right_mid = torch.vstack([e[1] for e in start_endpts_]).mean(dim=0, keepdim=True)
             tensegrity_prin = tensegrity_right_mid - tensegrity_left_mid
             tensegrity_prin /= tensegrity_prin.norm(dim=1, keepdim=True)
             tensegrity_com = torch.vstack(start_endpts).mean(dim=0, keepdim=True)
-            start_state_ = sim.tensegrity_robot.align_prin_axis_2d(tensegrity_prin, tensegrity_com)
+            start_state_ = dummy_sim.tensegrity_robot.align_prin_axis_2d(tensegrity_prin, tensegrity_com)
             start_state_ = start_state_.reshape(-1, 13, 1)
 
-            # all_states.extend(states)
-            #
-            # all_states = [{'time': 0.001 * j, 'pos': s.reshape(-1, 13)[:, :7].flatten().numpy().tolist()}
-            #               for j, s in enumerate(all_states)][::10]
-            # with Path(self.output_dir, f"{self.curr_dataset_name}_init_frames.json").open('w') as fp:
-            #     json.dump(all_states, fp)
-
-            # start_state_ = states[-1].reshape(-1, 13, 1)
             self.start_state = torch.hstack([start_state_[:, :7],
                                              torch.zeros_like(start_state_[:, 7:])
                                              ]).reshape(1, -1, 1)
             self.act_lengths = [c.actuation_length.detach()
-                                for c in sim.tensegrity_robot.actuated_cables.values()]
+                                for c in dummy_sim.tensegrity_robot.actuated_cables.values()]
+
             for i, c in enumerate(self.simulator.tensegrity_robot.actuated_cables.values()):
                 c.actuation_length = self.act_lengths[i].detach().clone()
-            print(self.start_state.flatten().numpy().tolist())
-            print([a.item() for a in self.act_lengths])
-
-            curr_endpts = [e for r in sim.tensegrity_robot.rods.values() for e in r.end_pts]
-            print(((torch.vstack(start_endpts) - torch.vstack(curr_endpts)) ** 2).mean().item())
 
             self.start_states_dict[self.curr_dataset_name] = self.start_state.detach().clone()
             self.act_len_dict[self.curr_dataset_name] = self.act_lengths
@@ -592,7 +575,6 @@ class RealTensegrityTrainingEngine(AbstractRealTensegrityTrainingEngine):
             self.start_state = self.start_states_dict[self.curr_dataset_name].detach().clone()
             for i, c in enumerate(self.simulator.tensegrity_robot.actuated_cables.values()):
                 c.actuation_length = self.act_len_dict[self.curr_dataset_name][i].detach().clone()
-        # self.simulator.max_correction_norm = 1e-3
 
     def forward(self) -> Tuple[torch.Tensor, List]:
         """
@@ -602,13 +584,9 @@ class RealTensegrityTrainingEngine(AbstractRealTensegrityTrainingEngine):
         :return:
         """
         self.init_simulator()
-        # self.simulator.reset_actuation()
         curr_state = self.start_state.clone()
         states, pred_key_endpts = [], []
-        # states = []
-        # pred_key_endpts = torch.zeros((self.num_gaits, 18, 1), dtype=curr_state.dtype)
         total_steps = 0
-        curr_time = 0.0
 
         for i in tqdm.tqdm(list(range(self.num_gaits))):
             target_gait = self.target_gaits[i]
@@ -626,28 +604,18 @@ class RealTensegrityTrainingEngine(AbstractRealTensegrityTrainingEngine):
                  if i < len(self.target_gaits) - 1
                  else len(self.data_json) - 1)
             )
-            # max_steps = 10
-            max_steps = int(math.ceil(gait_time / self.dt))
             controls = torch.ones(len(target_gait_dict), dtype=self.simulator.sys_precision)
-            step = 0
             while (controls != 0.0).any():
-                # for _ in range(max_steps):
                 total_steps += 1
                 curr_state, controls = self.simulator.step_with_target_gait(
                     curr_state,
                     self.dt,
                     target_gait_dict=target_gait_dict
                 )
-                # states.append(curr_state.detach())
 
                 controls = torch.hstack(controls).detach()
-            # print(step)
-            # pred_key_endpts[i] = self._batch_compute_end_pts(curr_state)
             pred_key_endpts.append(self._batch_compute_end_pts(curr_state))
-            # print(pred_key_endpts[-1].squeeze())
-
         pred_key_endpts = torch.vstack(pred_key_endpts)
-        # print(total_steps)
 
         return states, pred_key_endpts
 

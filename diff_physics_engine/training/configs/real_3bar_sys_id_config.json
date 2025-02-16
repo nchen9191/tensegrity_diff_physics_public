@@ -1,5 +1,5 @@
 {
-  "sim_config": "diff_physics_engine/simulators/configs/3_bar_tensegrity_upscaled_new_platform.json",
+  "sim_config": "diff_physics_engine/simulators/configs/3_bar_tensegrity_upscaled_v3.json",
   "optimizer_params": {
     "lr": 1e-3,
     "weight_decay": 0.01
