@@ -1,0 +1,190 @@
+{
+  "sim_config": "../diff_physics_engine/simulators/configs/3_bar_tensegrity_hanging.json",
+  "trainable_params": {
+    "spring_0": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          100,
+          700
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_1": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          100,
+          700
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_2": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          100,
+          700
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_3": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          100,
+          700
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_4": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          100,
+          700
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_5": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          100,
+          700
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_6": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          300,
+          1200
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_7": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          300,
+          1200
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "spring_8": [
+      {
+        "param_name": "stiffness",
+        "range": [
+          300,
+          1200
+        ]
+      },
+      {
+        "param_name": "damping",
+        "range": [
+          0,
+          200
+        ]
+      }
+    ],
+    "collision_response_generator": [
+      {
+        "param_name": "contact_params-default-restitution",
+        "range": [
+          -1,
+          1
+        ]
+      },
+      {
+        "param_name": "contact_params-default-baumgarte",
+        "range": [
+          0,
+          1
+        ]
+      },
+      {
+        "param_name": "contact_params-default-friction",
+        "range": [
+          0,
+          1.5
+        ]
+      }
+    ]
+  },
+  "batch_size": 16,
+  "optimizer_params": {
+    "lr": 0.1
+  },
+  "dataset_params": {
+    "data_path": "/Users/nelsonchen/Documents/Rutgers-CS-PhD/Research/tensegrity/experiments/mjc/3_rod_spring_sphere_endcaps_moving/new_data.json",
+    "num_steps": 1,
+    "sample_rate": 1,
+    "num_rods": 3,
+    "end_pt_names": [
+      "rod_0_end_pt1",
+      "rod_0_end_pt2",
+      "rod_1_end_pt1",
+      "rod_1_end_pt2",
+      "rod_2_end_pt1",
+      "rod_2_end_pt2"
+    ]
+  }
+}
