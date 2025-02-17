@@ -431,15 +431,6 @@ class TensegrityRobot(BaseStateObject):
             self.system_topology.sites_dict[f"s{2 * i}"] = e[0]
             self.system_topology.sites_dict[f"s{2 * i + 1}"] = e[1]
 
-        sites_dict = self.system_topology.sites_dict
-        for k, v in sites_dict.items():
-            if len(k) < 3:
-                continue
-            e = f"s{k.split('_')[1]}"
-            endpt = sites_dict[e]
-            dist = (endpt - v).norm(dim=1)
-            lll = 9
-        #
         for rigid_body in self.rods.values():
             for site in rigid_body.sites.keys():
                 world_frame_pos = self.system_topology.sites_dict[site].reshape(-1, 3, 1)

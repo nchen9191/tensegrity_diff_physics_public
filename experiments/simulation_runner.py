@@ -5,9 +5,10 @@ from pathlib import Path
 import torch
 import tqdm
 
-from diff_physics_engine.simulators.tensegrity_simulator import TensegrityRobotSimulator as Simulator
+from diff_physics_engine.simulators.tensegrity_simulator import TensegrityRobotSimulator
 from diff_physics_engine.state_objects.rods import RodState
 from mujoco_visualizer_utils.mujoco_visualizer import MuJoCoVisualizer
+from utilities import torch_quaternion
 
 
 def run_by_control(simulator, ctrls, dt, gt_data, start_state=None):
@@ -110,10 +111,116 @@ def batch_compute_end_pts(sim, batch_state: torch.Tensor) -> torch.Tensor:
     return torch.concat(end_pts, dim=1)
 
 
+def detect_ground_endcaps(end_pts):
+    aug_end_pts = [[(i, end_pts[i]), (i + 1, end_pts[i + 1])] for i in range(0, len(end_pts), 2)]
+    aug_end_pts = [min(e, key=lambda x: x[1].flatten()[2].item()) for e in aug_end_pts]
+
+    ground_encaps = tuple([a[0] for a in aug_end_pts])
+
+    return ground_encaps
+
+
+def init_sim(cfg, start_end_pts=None, start_state=None):
+    assert start_end_pts is not None or start_state is not None
+
+    sim = TensegrityRobotSimulator.init_from_config_file(cfg)
+
+    if start_end_pts is None:
+        sim.update_state(start_state)
+        start_end_pts = [e for r in sim.tensegrity_robot.rods.values() for e in r.end_pts]
+    elif start_state is None:
+        end_pts = torch.vstack(start_end_pts).reshape(-1, 6, 1)
+        pos = (end_pts[:, 3:] + end_pts[:, :3]) / 2.
+
+        prin = end_pts[:, 3:] - end_pts[:, :3]
+        prin = prin / prin.norm(dim=1, keepdim=True)
+        quat = torch_quaternion.compute_quat_btwn_z_and_vec(prin)
+
+        vel = torch.zeros_like(pos)
+        start_state = torch.hstack([pos, quat, vel, vel]).reshape(1, -1, 1)
+        sim.update_state(start_state)
+
+    sim.init_by_endpts(start_end_pts)
+    return sim
+
+
+def run_primitive(sim, curr_state, dt, prim_type, left_range, right_range):
+    symmetry_mapping = {(0, 2, 5): [0, 1, 2, 3, 4, 5], (0, 3, 5): [0, 1, 2, 3, 4, 5],
+                        (1, 2, 4): [1, 2, 0, 4, 5, 3], (1, 2, 5): [1, 2, 0, 4, 5, 3],
+                        (0, 3, 4): [2, 0, 1, 5, 3, 4], (1, 3, 4): [2, 0, 1, 5, 3, 4]}
+
+    if "ccw" == prim_type:
+        min_length = 1.0
+        range_ = 1.0
+        tol = 0.1
+    elif "roll" == prim_type:
+        min_length = 0.8
+        range_ = 1.0
+        tol = 0.1
+    elif "cw" == prim_type:
+        min_length = 0.7
+        range_ = 1.2
+        tol = 0.1
+    else:
+        min_length = 1.0
+        range_ = 1.0
+        tol = 0.1
+
+    prim_gaits = {
+        'ccw': [[1, 1, 1, 0, 1, 1], [1, 0, 1, 0, 1, 1], [0, 0, 0, 0, 0, 0], [1, 1, 1, 1, 1, 1]],
+        'cw': [[0, 0, 0, 1, 0, 1], [0, 0, 0, 0, 0, 1], [0, 0, 0.5, 0, 1, 1], [1, 1, 1, 1, 1, 1]],
+        'roll': [[1, 1, 0.1, 1, 1, 0.1], [0, 1, 1, 0, 1, 0.1], [1, 1, 1, 1, 1, 1]]
+    }
+
+    for i, pid in enumerate(sim.pids.values()):
+        pid.min_length = torch.tensor(min_length, dtype=torch.float64).reshape(1, 1, 1)
+
+        if prim_type == 'roll':
+            if i % 2 == 0:
+                range_ = left_range
+            else:
+                range_ = right_range
+
+        pid.RANGE = torch.tensor(range_, dtype=torch.float64).reshape(1, 1, 1)
+        pid.tol = torch.tensor(tol, dtype=torch.float64).reshape(1, 1, 1)
+
+    sim.update_state(curr_state)
+    end_pts = [e for r in sim.tensegrity_robot.rods.values() for e in r.end_pts]
+    ground_endcaps = detect_ground_endcaps(end_pts)
+    order = symmetry_mapping[ground_endcaps]
+
+    all_states = []
+    for gait in prim_gaits[prim_type]:
+        sim.update_state(curr_state)
+        target_gait = [gait[i] for i in order]
+        gait = {f"spring_{i}": v for i, v in enumerate(target_gait)}
+        gait_states, t = sim.run_target_gait(dt, curr_state, gait)
+        curr_state = gait_states[-1]
+
+        all_states.extend(gait_states)
+
+    return all_states
+
+
+def visualize(all_states, dt, output_dir):
+    frames = [
+        {
+            'time': dt * i,
+            'pos': all_states[i].reshape(-1, 13)[:7].flatten().numpy()
+        } for i in range(len(all_states))
+    ]
+    xml_path = Path("mujoco_physics_engine/xml_models/3prism_real_upscaled_vis.xml")
+    visualizer = MuJoCoVisualizer()
+    visualizer.set_xml_path(Path(xml_path))
+    visualizer.data = frames
+    visualizer.set_camera("camera")
+    visualizer.visualize(Path(output_dir, f"vid.mp4"), dt)
+
+
 def run_traj():
     # Set paths
     base_path = Path("../../tensegrity/data_sets/tensegrity_real_datasets/RSS_demo_old_platform/RSS_rolling/")
-    config_file_path = "diff_physics_engine/simulators/configs/3_bar_tensegrity_upscaled_v1.json"
+    config_file_path = "diff_physics_engine/simulators/configs/3_bar_tensegrity_upscaled_v2.json"
 
     # Get config
     with Path(config_file_path).open("r") as j:
@@ -204,7 +311,7 @@ def run_traj():
     sim.update_state(start_state)
 
     dt = torch.tensor([[[0.01]]], dtype=torch.float64)
-    frames, kf_pred_states = run_by_gait(sim, gaits[:], dt,  start_state,)
+    frames, kf_pred_states = run_by_gait(sim, gaits[:], dt, start_state, )
 
     # Visualize
     if len(vis_gt_data) >= len(frames):
