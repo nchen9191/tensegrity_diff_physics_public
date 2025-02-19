@@ -518,9 +518,10 @@ class TensegrityRobotSimulator(AbstractSimulator):
                 target_gait_dict=target_gait_dict
             )
 
-            lengths = [self.tensegrity_robot.compute_cable_length(c)[0].item() for c in
-                       self.tensegrity_robot.actuated_cables.values()]
-            combo = [(round(c.item(), 3), round(l, 3)) for c, l in zip(controls, lengths)]
+            # lengths = [self.tensegrity_robot.compute_cable_length(c)[0].item() for c in
+            #            self.tensegrity_robot.actuated_cables.values()]
+            # print(lengths)
+            # combo = [(round(c.item(), 3), round(l, 3)) for c, l in zip(controls, lengths)]
             # print(combo)
             # print([c.actuation_length.item() for c in self.tensegrity_robot.actuated_cables.values()])
             # r = [c.rest_length.item() for c in self.tensegrity_robot.actuated_cables.values()]

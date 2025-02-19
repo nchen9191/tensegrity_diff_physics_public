@@ -463,7 +463,7 @@ class RodCylinderMotorsSphericalEndCaps(RodSphericalEndCaps):
         motor_e1_dist = (motor_length / 2 + motor_offset) * prin_axis
         motor_e2_dist = (-motor_length / 2 + motor_offset) * prin_axis
 
-        ang_vel_comp = torch.cross(ang_vel, motor_offset * prin_axis)
+        ang_vel_comp = torch.cross(ang_vel, motor_offset * prin_axis, dim=1)
 
         motor1 = HollowCylinder(f'{self.name}_motor1',
                                 torch.concat([self.pos - motor_e1_dist,
