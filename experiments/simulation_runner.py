@@ -121,7 +121,7 @@ def detect_ground_endcaps(end_pts):
     return ground_encaps
 
 
-def init_sim(cfg, start_end_pts=None, start_state=None, rest_lengths=None):
+def init_sim(cfg, start_end_pts=None, start_state=None, rest_lengths=None, motor_speeds=None):
     assert start_end_pts is not None or start_state is not None
 
     sim = TensegrityRobotSimulator.init_from_config_file(cfg)
@@ -130,6 +130,10 @@ def init_sim(cfg, start_end_pts=None, start_state=None, rest_lengths=None):
         for i, c in enumerate(sim.tensegrity_robot.actuated_cables.values()):
             act_len = c._rest_length - rest_lengths[i]
             c.actuation_length = act_len
+
+    if motor_speeds:
+        for i, c in enumerate(sim.tensegrity_robot.actuated_cables.values()):
+            c.motor.motor_state.omega_t = torch.tensor([[[motor_speeds[i]]]], dtype=torch.float64)
 
     if start_end_pts is None:
         sim.update_state(start_state)
@@ -151,7 +155,14 @@ def init_sim(cfg, start_end_pts=None, start_state=None, rest_lengths=None):
     return sim, start_state
 
 
-def run_primitive(sim, curr_state, dt, prim_type, left_range, right_range):
+def run_primitive(sim,
+                  curr_state,
+                  rest_lengths,
+                  motor_speeds,
+                  dt,
+                  prim_type,
+                  left_range,
+                  right_range):
     symmetry_mapping = {(0, 2, 5): [0, 1, 2, 3, 4, 5], (0, 3, 5): [0, 1, 2, 3, 4, 5],
                         (1, 2, 4): [1, 2, 0, 4, 5, 3], (1, 2, 5): [1, 2, 0, 4, 5, 3],
                         (0, 3, 4): [2, 0, 1, 5, 3, 4], (1, 3, 4): [2, 0, 1, 5, 3, 4]}
@@ -191,23 +202,31 @@ def run_primitive(sim, curr_state, dt, prim_type, left_range, right_range):
         pid.RANGE = torch.tensor(range_, dtype=torch.float64).reshape(1, 1, 1)
         pid.tol = torch.tensor(tol, dtype=torch.float64).reshape(1, 1, 1)
 
+    for i, c in enumerate(sim.tensegrity_robot.actuated_cables.values()):
+        act_len = c._rest_length - rest_lengths[i]
+        c.actuation_length = act_len
+        c.motor.motor_state.omega_t = torch.tensor([[[motor_speeds[i]]]], dtype=torch.float64)
+
     sim.update_state(curr_state)
     end_pts = [e for r in sim.tensegrity_robot.rods.values() for e in r.end_pts]
     ground_endcaps = detect_ground_endcaps(end_pts)
     order = symmetry_mapping[ground_endcaps]
 
-    all_states = []
+    all_states, all_rest_lens, all_motor_speeds = [], [], []
     for gait in tqdm.tqdm(prim_gaits[prim_type]):
         sim.reset_pids()
         sim.update_state(curr_state)
         target_gait = [gait[i] for i in order]
         gait = {f"spring_{i}": v for i, v in enumerate(target_gait)}
-        gait_states, t = sim.run_target_gait(dt, curr_state, gait)
+        gait_states, gait_rest_lengths, gait_motor_speeds = (
+            sim.run_target_gait(dt, curr_state, gait))
         curr_state = gait_states[-1]
 
         all_states.extend(gait_states)
+        all_rest_lens.extend(gait_rest_lengths)
+        all_motor_speeds.extend(gait_motor_speeds)
 
-    return all_states
+    return all_states, all_rest_lens, all_motor_speeds
 
 
 # def multi_process_run_prim(sim, start_states, dt, prim_list):
@@ -305,7 +324,20 @@ def run_traj():
                     2.4 - 0.7215502303603479,
                     2.4 - 0.4086138651057926,
                     2.4 - 0.9001504827005256]
+    motor_speeds = [0., 0., 0., 0., 0., 0.]
 
-    sim, start_state = init_sim(config, start_end_pts, rest_lengths=rest_lengths)
-    all_states = run_primitive(sim, start_state, 0.01, 'roll', 1.0, 1.0)
+    sim, start_state = init_sim(config,
+                                start_end_pts,
+                                rest_lengths=rest_lengths,
+                                motor_speeds=motor_speeds)
+    start_rest_lengths = [c.rest_length for c in sim.tensegrity_robot.actuated_cables.values()]
+    start_motor_speed = [c.motor.motor_state.omega_t for c in sim.tensegrity_robot.actuated_cables.values()]
+    all_states, all_rest_lengths, all_motor_speeds = run_primitive(sim,
+                                                                   start_state,
+                                                                   start_rest_lengths,
+                                                                   start_motor_speed,
+                                                                   0.01,
+                                                                   'roll',
+                                                                   1.0,
+                                                                   1.0)
     visualize(all_states, 0.01, "./")

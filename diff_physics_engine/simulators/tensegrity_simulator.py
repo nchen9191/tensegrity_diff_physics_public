@@ -409,16 +409,18 @@ class TensegrityRobotSimulator(AbstractSimulator):
 
             controls.append(control)
 
-            # if name == 'spring_0':
-            #     print(curr_length.squeeze())
-            # del target
         self.tensegrity_robot.springs.update(self.tensegrity_robot.actuated_cables)
         next_state = super().step(curr_state,
                                   dt,
                                   external_forces,
                                   external_pts)
 
-        return next_state, controls
+        rest_lengths = [c.rest_length
+                        for c in self.tensegrity_robot.actuated_cables.values()]
+        motor_speeds = [c.motor.motor_state.omega_t
+                        for c in self.tensegrity_robot.actuated_cables.values()]
+
+        return next_state, controls, rest_lengths, motor_speeds
 
     def step(self,
              curr_state: torch.Tensor,
@@ -508,27 +510,24 @@ class TensegrityRobotSimulator(AbstractSimulator):
         controls = torch.ones(len(target_gait_dict),
                               dtype=self.sys_precision)
         states = [curr_state.clone()]
+        rest_lengths = [[c.rest_length.clone()
+                         for c in self.tensegrity_robot.actuated_cables.values()]]
+        motor_speeds = [[c.motor.motor_state.omega_t.clone()
+                         for c in self.tensegrity_robot.actuated_cables.values()]]
 
         while (controls != 0.0).any() and len(states) < max_steps:
-            # print(round(time, 3))
-            time += dt
-            curr_state, controls = self.step_with_target_gait(
+            curr_state, controls, rest_lens, omega_t = self.step_with_target_gait(
                 states[-1],
                 dt,
                 target_gait_dict=target_gait_dict
             )
 
-            # lengths = [self.tensegrity_robot.compute_cable_length(c)[0].item() for c in
-            #            self.tensegrity_robot.actuated_cables.values()]
-            # print(lengths)
-            # combo = [(round(c.item(), 3), round(l, 3)) for c, l in zip(controls, lengths)]
-            # print(combo)
-            # print([c.actuation_length.item() for c in self.tensegrity_robot.actuated_cables.values()])
-            # r = [c.rest_length.item() for c in self.tensegrity_robot.actuated_cables.values()]
             states.append(curr_state.clone())
+            rest_lengths.append(rest_lens)
+            motor_speeds.append(omega_t)
             controls = torch.hstack(controls)
 
-        return states, time
+        return states, rest_lengths, motor_speeds
 
     def init_by_endpts(self, end_pts):
         self.tensegrity_robot.init_by_endpts(end_pts)
