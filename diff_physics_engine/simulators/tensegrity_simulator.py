@@ -514,7 +514,7 @@ class TensegrityRobotSimulator(AbstractSimulator):
                          for c in self.tensegrity_robot.actuated_cables.values()]]
         motor_speeds = [[c.motor.motor_state.omega_t.clone()
                          for c in self.tensegrity_robot.actuated_cables.values()]]
-
+        all_controls = []
         while (controls != 0.0).any() and len(states) < max_steps:
             curr_state, controls, rest_lens, omega_t = self.step_with_target_gait(
                 states[-1],
@@ -526,8 +526,9 @@ class TensegrityRobotSimulator(AbstractSimulator):
             rest_lengths.append(rest_lens)
             motor_speeds.append(omega_t)
             controls = torch.hstack(controls)
+            all_controls.append(controls)
 
-        return states, rest_lengths, motor_speeds
+        return states, rest_lengths, motor_speeds, all_controls
 
     def init_by_endpts(self, end_pts):
         self.tensegrity_robot.init_by_endpts(end_pts)

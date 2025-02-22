@@ -1,4 +1,5 @@
 import json
+import time
 from copy import deepcopy
 from pathlib import Path
 import multiprocessing
@@ -130,6 +131,7 @@ def init_sim(cfg, start_end_pts=None, start_state=None, rest_lengths=None, motor
         for i, c in enumerate(sim.tensegrity_robot.actuated_cables.values()):
             act_len = c._rest_length - rest_lengths[i]
             c.actuation_length = act_len
+            c.motor.speed = torch.tensor([[[0.99]]], dtype=torch.float64)
 
     if motor_speeds:
         for i, c in enumerate(sim.tensegrity_robot.actuated_cables.values()):
@@ -157,12 +159,13 @@ def init_sim(cfg, start_end_pts=None, start_state=None, rest_lengths=None, motor
 
 def run_primitive(sim,
                   curr_state,
-                  rest_lengths,
-                  motor_speeds,
+                  init_rest_lengths,
+                  init_motor_speeds,
                   dt,
                   prim_type,
                   left_range,
-                  right_range):
+                  right_range,
+                  max_steps=500):
     symmetry_mapping = {(0, 2, 5): [0, 1, 2, 3, 4, 5], (0, 3, 5): [0, 1, 2, 3, 4, 5],
                         (1, 2, 4): [1, 2, 0, 4, 5, 3], (1, 2, 5): [1, 2, 0, 4, 5, 3],
                         (0, 3, 4): [2, 0, 1, 5, 3, 4], (1, 3, 4): [2, 0, 1, 5, 3, 4]}
@@ -203,30 +206,32 @@ def run_primitive(sim,
         pid.tol = torch.tensor(tol, dtype=torch.float64).reshape(1, 1, 1)
 
     for i, c in enumerate(sim.tensegrity_robot.actuated_cables.values()):
-        act_len = c._rest_length - rest_lengths[i]
+        act_len = c._rest_length - init_rest_lengths[i]
         c.actuation_length = act_len
-        c.motor.motor_state.omega_t = torch.tensor([[[motor_speeds[i]]]], dtype=torch.float64)
+        c.motor.motor_state.omega_t = torch.tensor([[[init_motor_speeds[i]]]], dtype=torch.float64)
 
     sim.update_state(curr_state)
     end_pts = [e for r in sim.tensegrity_robot.rods.values() for e in r.end_pts]
     ground_endcaps = detect_ground_endcaps(end_pts)
     order = symmetry_mapping[ground_endcaps]
 
+    all_controls = []
     all_states, all_rest_lens, all_motor_speeds = [], [], []
     for gait in tqdm.tqdm(prim_gaits[prim_type]):
         sim.reset_pids()
         sim.update_state(curr_state)
         target_gait = [gait[i] for i in order]
-        gait = {f"spring_{i}": v for i, v in enumerate(target_gait)}
-        gait_states, gait_rest_lengths, gait_motor_speeds = (
-            sim.run_target_gait(dt, curr_state, gait))
+        target_gait_dict = {f"spring_{i}": v for i, v in enumerate(target_gait)}
+        gait_states, gait_rest_lengths, gait_motor_speeds, gait_controls = (
+            sim.run_target_gait(dt, curr_state, target_gait_dict))
         curr_state = gait_states[-1]
 
+        all_controls.extend(gait_controls)
         all_states.extend(gait_states)
         all_rest_lens.extend(gait_rest_lengths)
         all_motor_speeds.extend(gait_motor_speeds)
 
-    return all_states, all_rest_lens, all_motor_speeds
+    return all_states, all_rest_lens, all_motor_speeds, all_controls
 
 
 # def multi_process_run_prim(sim, start_states, dt, prim_list):
@@ -243,7 +248,7 @@ def run_primitive(sim,
 #     ]
 
 
-def visualize(all_states, dt, output_dir):
+def visualize(all_states, dt, output_path):
     frames = [
         {
             'time': dt * i,
@@ -255,7 +260,7 @@ def visualize(all_states, dt, output_dir):
     visualizer.set_xml_path(Path(xml_path))
     visualizer.data = frames
     visualizer.set_camera("camera")
-    visualizer.visualize(Path(output_dir, f"vid.mp4"), dt)
+    visualizer.visualize(Path(output_path), dt)
 
 
 def run_traj():
@@ -303,41 +308,51 @@ def run_traj():
     #
     config['contact_params'] = contact_params
 
-    start_end_pts = [
-        [torch.tensor([-0.8607014597960383, -1.076264039468757, 0.2718694524182526],
-                      dtype=torch.float64).reshape(1, 3, 1),
-         torch.tensor([0.4619218124455742, 0.9927949124400106, 1.9079067849290041],
-                      dtype=torch.float64).reshape(1, 3, 1)],
-        [torch.tensor([0.8895405888183956, -1.0097047952850744, 0.18641452381580476],
-                      dtype=torch.float64).reshape(1, 3, 1),
-         torch.tensor([-1.1154402297545136, 1.0273033407592496, 0.9193600788678237],
-                      dtype=torch.float64).reshape(1, 3, 1)],
-        [torch.tensor([0.3035689922554887, -1.2530591438557919, 1.6217887425373758],
-                      dtype=torch.float64).reshape(1, 3, 1),
-         torch.tensor([0.3211102960310983, 1.3189297254103636, 0.17500000000000002],
-                      dtype=torch.float64).reshape(1, 3, 1)]
+    prims = [
+        ("ccw", 1.0, 1.0),
+        ("cw", 1.0, 1.0),
+        ("roll", 1.0, 1.0),
     ]
 
-    rest_lengths = [2.4 - 0.8349991846996137,
-                    2.4 - 0.5910817854216738,
-                    2.4 - 0.43105745581176963,
-                    2.4 - 0.7215502303603479,
-                    2.4 - 0.4086138651057926,
-                    2.4 - 0.9001504827005256]
-    motor_speeds = [0., 0., 0., 0., 0., 0.]
+    for prim in prims:
+        start = time.time()
+        start_end_pts = [
+            [torch.tensor([-0.8607014597960383, -1.076264039468757, 0.2718694524182526],
+                          dtype=torch.float64).reshape(1, 3, 1),
+             torch.tensor([0.4619218124455742, 0.9927949124400106, 1.9079067849290041],
+                          dtype=torch.float64).reshape(1, 3, 1)],
+            [torch.tensor([0.8895405888183956, -1.0097047952850744, 0.18641452381580476],
+                          dtype=torch.float64).reshape(1, 3, 1),
+             torch.tensor([-1.1154402297545136, 1.0273033407592496, 0.9193600788678237],
+                          dtype=torch.float64).reshape(1, 3, 1)],
+            [torch.tensor([0.3035689922554887, -1.2530591438557919, 1.6217887425373758],
+                          dtype=torch.float64).reshape(1, 3, 1),
+             torch.tensor([0.3211102960310983, 1.3189297254103636, 0.17500000000000002],
+                          dtype=torch.float64).reshape(1, 3, 1)]
+        ]
 
-    sim, start_state = init_sim(config,
-                                start_end_pts,
-                                rest_lengths=rest_lengths,
-                                motor_speeds=motor_speeds)
-    start_rest_lengths = [c.rest_length for c in sim.tensegrity_robot.actuated_cables.values()]
-    start_motor_speed = [c.motor.motor_state.omega_t for c in sim.tensegrity_robot.actuated_cables.values()]
-    all_states, all_rest_lengths, all_motor_speeds = run_primitive(sim,
-                                                                   start_state,
-                                                                   start_rest_lengths,
-                                                                   start_motor_speed,
-                                                                   0.01,
-                                                                   'roll',
-                                                                   1.0,
-                                                                   1.0)
-    visualize(all_states, 0.01, "./")
+        rest_lengths = [2.4 - 0.8349991846996137,
+                        2.4 - 0.5910817854216738,
+                        2.4 - 0.43105745581176963,
+                        2.4 - 0.7215502303603479,
+                        2.4 - 0.4086138651057926,
+                        2.4 - 0.9001504827005256]
+        motor_speeds = [0., 0., 0., 0., 0., 0.]
+
+        sim, start_state = init_sim(config,
+                                    start_end_pts,
+                                    rest_lengths=rest_lengths,
+                                    motor_speeds=motor_speeds)
+        start_rest_lengths = [c.rest_length for c in sim.tensegrity_robot.actuated_cables.values()]
+        start_motor_speed = [c.motor.motor_state.omega_t for c in sim.tensegrity_robot.actuated_cables.values()]
+        all_states, _, _, all_controls = run_primitive(sim,
+                                                       start_state,
+                                                       start_rest_lengths,
+                                                       start_motor_speed,
+                                                       0.01,
+                                                       prim[0],
+                                                       prim[1],
+                                                       prim[2])
+
+        print(time.time() - start)
+        visualize(all_states, 0.01, f"./vid_{prim[0]}.mp4")
