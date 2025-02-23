@@ -5,101 +5,6 @@ import torch
 from utilities.tensor_utils import zeros
 
 
-@DeprecationWarning
-class TorchQuaternion:
-
-    def __init__(self, w, x, y, z, dtype=torch.float):
-        self.tensor = torch.tensor([w, x, y, z], dtype=dtype)
-
-    @classmethod
-    def init_from_vec(cls, w, vec, dtype=torch.float64):
-        return cls(w, vec[0], vec[1], vec[2], dtype)
-
-    @classmethod
-    def as_quat(cls, v, dtype=torch.float64):
-        if isinstance(v, TorchQuaternion):
-            return v
-        elif isinstance(v, float) or isinstance(v, int):
-            return cls(v, 0, 0, 0, dtype)
-        else:
-            return cls.init_from_vec(0, v, dtype)
-
-    def norm(self):
-        return self.tensor.norm()
-
-    def as_mat(self):
-        w, x, y, z = self.tensor
-        mat = torch.tensor([[w, -x, -y, -z],
-                            [x, w, -z, y],
-                            [y, z, w, -x],
-                            [z, -y, x, w]], dtype=self.tensor.dtype)
-        return mat
-
-    def as_rotation_mat(self):
-        w, x, y, z = self.tensor / self.tensor.norm()
-
-        # First row of the rotation matrix
-        r00 = 2 * (w * w + x * x) - 1
-        r01 = 2 * (x * y - w * z)
-        r02 = 2 * (x * z + w * y)
-
-        # Second row of the rotation matrix
-        r10 = 2 * (x * y + w * z)
-        r11 = 2 * (w * w + y * y) - 1
-        r12 = 2 * (y * z - w * x)
-
-        # Third row of the rotation matrix
-        r20 = 2 * (x * z - w * y)
-        r21 = 2 * (y * z + w * x)
-        r22 = 2 * (w * w + z * z) - 1
-
-        # 3x3 rotation matrix
-        rot_matrix = torch.tensor([[r00, r01, r02],
-                                   [r10, r11, r12],
-                                   [r20, r21, r22]],
-                                  dtype=self.tensor.dtype)
-
-        return rot_matrix
-
-    def copy(self):
-        return copy.deepcopy(self)
-
-    def __add__(self, other):
-        new_tensor = self.tensor + other.tensor
-        return TorchQuaternion.init_from_vec(new_tensor[0], new_tensor[1:], self.tensor.dtype)
-
-    def __mul__(self, other):
-        if isinstance(other, int) or isinstance(other, float) or \
-                (isinstance(other, torch.Tensor) and other.squeeze().shape[0] == 1):
-            new_tensor = self.tensor * other
-        else:
-            mat = self.as_mat()
-            new_tensor = torch.matmul(mat, other.tensor.unsqueeze(1)).squeeze()
-
-        return TorchQuaternion.init_from_vec(new_tensor[0], new_tensor[1:], self.tensor.dtype)
-
-    def __truediv__(self, other):
-        new_tensor = self.tensor / other
-        return TorchQuaternion.init_from_vec(new_tensor[0], new_tensor[1:], self.tensor.dtype)
-
-
-def torch_quat_exp(q: TorchQuaternion):
-    if q.norm() == 0:
-        return TorchQuaternion(1, 0, 0, 0, q.tensor.dtype)
-
-    w = q.tensor[0]
-    v = q.tensor[1:]
-
-    v_norm = torch.linalg.norm(v)
-
-    new_w = torch.exp(w) * torch.cos(v_norm)
-    new_v = torch.exp(w) * torch.sin(v_norm) * v / v_norm
-
-    exp_q = TorchQuaternion.init_from_vec(new_w, new_v, q.tensor.dtype)
-
-    return exp_q
-
-
 def quat_add(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     return q1 + q2
 
@@ -126,14 +31,15 @@ def quat_exp(q: torch.Tensor) -> torch.Tensor:
     exp_w = torch.exp(w)
     new_w = exp_w * torch.cos(v_norm)
 
-    new_v = torch.zeros(v.shape, dtype=v.dtype, device=v.device)
-    non_zero_v = torch.where(v_norm != 0)[0]
+    # new_v = torch.zeros(v.shape, dtype=v.dtype, device=v.device)
+    # non_zero_v = torch.where(v_norm != 0)[0]
     # v_norm[v_norm == 0] = v_norm[v_norm == 0] + 1e-8
-    new_v[non_zero_v] = (v[non_zero_v]
-                         * exp_w[non_zero_v]
-                         * torch.sin(v_norm[non_zero_v])
-                         / v_norm[non_zero_v])
-    # new_v = v * exp_w * torch.sin(v_norm) / v_norm
+    # new_v[non_zero_v] = (v[non_zero_v]
+    #                      * exp_w[non_zero_v]
+    #                      * torch.sin(v_norm[non_zero_v])
+    #                      / v_norm[non_zero_v])
+    v_norm = torch.clamp_min(v_norm, 1e-8)
+    new_v = v * exp_w * torch.sin(v_norm) / v_norm
     exp_q = torch.hstack([new_w, new_v])
 
     return exp_q
@@ -180,32 +86,6 @@ def compute_ang_vel_vecs(prev_vec, curr_vec, dt):
     return ang_vel
 
 
-def compute_ang_vel_rot_mats(prev_rot_mat, curr_rot_mat, dt):
-    if prev_rot_mat.shape[1] == 6:
-        prev_rot_mat = xy_to_rot_mat(prev_rot_mat[:, :3], prev_rot_mat[:, 3:6])
-
-    if curr_rot_mat.shape[1] == 6:
-        curr_rot_mat = xy_to_rot_mat(curr_rot_mat[:, :3], curr_rot_mat[:, 3:6])
-
-    rot_diff = torch.matmul(curr_rot_mat, prev_rot_mat.transpose(1, 2))
-    trace_rot_diff = rot_diff[:, 0:1, 0:1] + rot_diff[:, 1:2, 1:2] + rot_diff[:, 2:3, 2:3]
-    cos = (trace_rot_diff - 1) / 2.0
-    cos = torch.clamp(cos, -1, 1)
-    angle = torch.acos(cos)
-
-    eye = torch.eye(
-        3,
-        dtype=rot_diff.dtype,
-        device=rot_diff.device
-    ).repeat(rot_diff.shape[0], 1, 1)
-    T = rot_diff + rot_diff.transpose(1, 2) - (trace_rot_diff - 1.0) * eye
-    axis = T[:, :, 0:1] / T[:, :, 0:1].norm(dim=1, keepdim=True)
-
-    ang_vel = (angle / dt) * axis
-
-    return ang_vel
-
-
 def compute_angle_btwn_quats(q1, q2):
     # q1 -> q2 (order matters)
     q_diff = quat_prod(inverse_unit_quat(q1.reshape(-1, 4, 1)), q2.reshape(-1, 4, 1))
@@ -239,24 +119,12 @@ def compute_rot_mat_axis(rot_mat):
 
 
 def rotate_vec_quat(q, vec):
-    if len(q.shape) == 2:
-        q = q.unsqueeze(-1)
-
-    if len(vec.shape) == 2:
-        vec = vec.unsqueeze(-1)
-
     vec_q = torch.hstack([
         torch.zeros((vec.shape[0], 1, vec.shape[2]),
                     device=vec.device,
                     dtype=vec.dtype),
         vec
     ])
-
-    if vec.shape[0] == 1 and q.shape[0] > 1:
-        vec = vec.repeat(q.shape[0], 1, 1)
-
-    if q.shape[0] == 1 and vec.shape[0] > 1:
-        q = q.repeat(vec.shape[0], 1, 1)
 
     q_conj = inverse_unit_quat(q)
 
@@ -297,9 +165,6 @@ def quat_as_rot_mat(quat):
 
 
 def cross_prod_mat(vec):
-    if len(vec.shape) == 2:
-        vec = vec.unsqueeze(-1)
-
     v1, v2, v3 = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
     z0 = zeros(v1.shape, ref_tensor=vec)
 
@@ -330,98 +195,6 @@ def axis_angle_to_quat(axis, angle):
     v = torch.sin(angle / 2.0) * axis
 
     quat = torch.hstack([w, v])
-    return quat
-
-
-def rot_mat_to_quat(rot_mat):
-    trace = rot_mat[:, 0, 0] + rot_mat[:, 1, 1] + rot_mat[:, 2, 2]
-    qw = 0.25 * (1.0 + trace)
-
-    use_sym = torch.abs(qw) < 1e-7
-
-    qx = 0.25 * (rot_mat[:, 2, 1] - rot_mat[:, 1, 2])
-    qy = 0.25 * (rot_mat[:, 0, 2] - rot_mat[:, 2, 0])
-    qz = 0.25 * (rot_mat[:, 1, 0] - rot_mat[:, 0, 1])
-
-    quat = torch.stack([qw, qx, qy, qz], dim=-1).unsqueeze(-1)
-
-    if use_sym.any():
-        eye = torch.eye(3, dtype=qw.dtype, device=qw.device).repeat(rot_mat.shape[0], 1, 1)
-        T = rot_mat + rot_mat.transpose(1, 2) - (trace.reshape(-1, 1, 1) - 1.0) * eye
-        quat[use_sym, 1:, 0] = -T[use_sym, :, 0]
-
-        for i in range(1, 4):
-            degen_quat = (torch.abs(quat) < 1e-6).all(dim=1)
-            if degen_quat.any():
-                if i < 3:
-                    quat[degen_quat.squeeze(-1), 1:, 0] = -T[degen_quat.squeeze(-1), :, i]
-                else:
-                    raise Exception("Rot Mat conversion to quat degeneracy found")
-            else:
-                break
-
-    quat = quat / quat.norm(dim=1, keepdim=True)
-
-    """
-    if (m22 < 0){
-         if (m00 > m11){
-             t = 1 + m00 - m11 - m22;
-             q = quat( t, m01+m10, m20+m02, m12-m21 );
-         }
-         else {
-             t = 1 - m00 + m11 - m22;
-             q = quat( m01+m10, t, m12+m21, m20-m02 );
-         }
-    } else {
-         if (m00 < -m11) {
-             t = 1 - m00 - m11 + m22;
-             q = quat( m20+m02, m12+m21, t, m01-m10 );
-         }
-         else {
-             t = 1 + m00 + m11 + m22;
-             q = quat( m12-m21, m20-m02, m01-m10, t );
-         }
-     }
-     q *= 0.5 / Sqrt(t);
-    """
-    #
-    # r00, r01, r02 = rot_mat[:, 0:1, 0], rot_mat[:, 0:1, 1], rot_mat[:, 0:1, 2]
-    # r10, r11, r12 = rot_mat[:, 1:2, 0], rot_mat[:, 1:2, 1], rot_mat[:, 1:2, 2]
-    # r20, r21, r22 = rot_mat[:, 2:3, 0], rot_mat[:, 2:3, 1], rot_mat[:, 2:3, 2]
-
-    # pre_cond0 = r22 < 0.0
-    # pre_cond1 = r00 > r11
-    # pre_cond2 = r00 < -r11
-    #
-    # cond1 = torch.logical_and(pre_cond0, pre_cond1)
-    # cond2 = torch.logical_and(pre_cond0, ~pre_cond1)
-    # cond3 = torch.logical_and(~pre_cond0, pre_cond2)
-    # cond4 = torch.logical_and(~pre_cond0, ~pre_cond2)
-    #
-    # t1 = 1.0 + r00 - r11 - r22
-    # t2 = 1.0 - r00 + r11 - r22
-    # t3 = 1.0 - r00 - r11 + r22
-    # t4 = 1.0 + r00 + r11 + r22
-    #
-    # t = cond1 * t1 + cond2 * t2 + cond3 * t3 + cond4 * t4
-    #
-    # q1 = torch.hstack([t, r01 + r10, r20 + r02, r12 - r21])
-    # q2 = torch.hstack([r01 + r10, t, r12 + r21, r20 - r02])
-    # q3 = torch.hstack([r20 + r02, r12 + r21, t, r01 - r10])
-    # q4 = torch.hstack([r12 - r21, r20 - r02, r01 - r10, t])
-    #
-    # q = cond1 * q1 + cond2 * q2 + cond3 * q3 + cond4 * q4
-    # q *= 0.5 / (t ** 0.5)
-
-    # qx = 0.25 * (rot_mat[:, 2, 1] - rot_mat[:, 1, 2]) / (qw + 1e-8)
-    # qy = 0.25 * (rot_mat[:, 0, 2] - rot_mat[:, 2, 0]) / (qw + 1e-8)
-    # qz = 0.25 * (rot_mat[:, 1, 0] - rot_mat[:, 0, 1]) / (qw + 1e-8)
-
-    # q = torch.hstack([
-    #     qw,
-    #     torch.sign(r21 - r12) * 0.5 * torch.abs(())
-    # ])
-
     return quat
 
 
@@ -463,48 +236,6 @@ def update_quat2(quat, ang_vel, dt):
     return quat
 
 
-def update_rot_mat(rot_mat, ang_vel, dt):
-    if rot_mat.shape[1] == 6 and rot_mat.shape[2] == 1:
-        rot_mat = xy_to_rot_mat(rot_mat[:, :3], rot_mat[:, 3:6])
-
-    # rodrigues formula = e^(omega * theta) = I + omega * sin(theta) + omega^2 * (1 - cos(theta))
-    ang_vel_norm = ang_vel.norm(dim=1, keepdim=True)
-    nonzero = (ang_vel_norm != 0.0).squeeze()
-    angle = ang_vel_norm * dt
-    ang_vel_hat = ang_vel[nonzero] / ang_vel_norm[nonzero]
-
-    omega = cross_prod_mat(ang_vel_hat)
-    omega_rot_mat = torch.matmul(omega, rot_mat[nonzero])
-    omega2_rot_mat = torch.matmul(omega, omega_rot_mat)
-
-    new_rot_mat = rot_mat.clone()
-    new_rot_mat[nonzero] = ((1 - torch.cos(angle)) * omega2_rot_mat
-                            + torch.sin(angle) * omega_rot_mat
-                            + rot_mat[nonzero])
-
-    return new_rot_mat
-
-
-def xy_to_rot_mat(x, y):
-    if len(x.shape) == 2:
-        x = x.unsqueeze(-1)
-
-    if len(y.shape) == 2:
-        y = y.unsqueeze(-1)
-
-    x_hat = x / x.norm(dim=1, keepdim=True)
-
-    z = torch.cross(x_hat, y, dim=1)
-    z_hat = z / z.norm(dim=1, keepdim=True)
-
-    y = torch.cross(z_hat, x_hat, dim=1)
-    y_hat = y / y.norm(dim=1, keepdim=True)
-
-    rot_mat = torch.concat([x_hat, y_hat, z_hat], dim=2)
-
-    return rot_mat
-
-
 def compute_q_btwn_vecs(v1, v2):
     v1_mag = v1.norm(dim=1, keepdim=True)
     v2_mag = v2.norm(dim=1, keepdim=True)
@@ -534,20 +265,3 @@ def compute_quat_btwn_z_and_vec(prin_axis):
     q = q / q.norm(dim=1, keepdim=True)
 
     return q.reshape(-1, 4, 1)
-
-
-if __name__ == '__main__':
-    q1 = torch.tensor([1.0, -1.4, 0.156, 0.67]).reshape(1, 4, 1)
-    q1 /= q1.norm(dim=1, keepdim=True)
-
-    r1 = quat_as_rot_mat(q1)
-    x = r1[:, :, 0:1]
-
-    rot_q = torch.hstack([
-        torch.zeros((1, 1, 1)),
-        x
-        ])
-    q2 = quat_prod(rot_q, q1)
-    r2 = quat_as_rot_mat(q2)
-    mm=0
-

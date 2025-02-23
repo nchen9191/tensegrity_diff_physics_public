@@ -1,0 +1,139 @@
+{
+  "timestep_size": 0.001,
+  "num_steps": 3000,
+  "system_precision": "float64",
+  "gravity": [0, 0, -9.81],
+  "rods": [
+    {
+      "name": "rod_0",
+      "rod_type": "rod_sphere_end_caps",
+      "end_pts": [[-8.75, -5.94, 11.96], [8.38, 5.16, 7]],
+      "linear_vel": [5, 5, 0],
+      "ang_vel": [0, 0, 0],
+      "radius": 0.5,
+      "sphere_radius": 1.0,
+      "sphere_mass": 1.0,
+      "mass": 2.4,
+      "sites": ["s0", "s1"],
+      "shape": "cylinder"
+    },
+    {
+      "name": "rod_1",
+      "rod_type": "rod_sphere_end_caps",
+      "end_pts": [[-8.26, 2.81, 17], [8.51, -4.94, 6.999]],
+      "linear_vel": [0, 0, 0],
+      "ang_vel": [0, 0, 0],
+      "radius": 0.5,
+      "sphere_radius": 1.0,
+      "sphere_mass": 1.0,
+      "mass": 2.4,
+      "sites": ["s2", "s3"],
+      "shape": "cylinder",
+      "fixed": true
+    },
+    {
+      "name": "rod_2",
+      "rod_type": "rod_sphere_end_caps",
+      "end_pts": [[-9.47, 2.81, 6.999], [9.48, 0.112, 15.65]],
+      "linear_vel": [0, 0, 0],
+      "ang_vel": [0, 0, 0],
+      "radius": 0.5,
+      "sphere_radius": 1.0,
+      "sphere_mass": 1.0,
+      "mass": 2.4,
+      "sites": ["s4", "s5"],
+      "shape": "cylinder"
+    }
+  ],
+  "system_topology": {
+    "sites": {
+      "s0": [-8.75, -5.94, 11.96],
+      "s1": [8.38, 5.16, 7],
+      "s2": [-8.26, 2.81, 17],
+      "s3": [8.51, -4.94, 6.999],
+      "s4": [-9.47, 2.81, 6.999],
+      "s5": [9.48, 0.112, 15.65]
+    },
+    "topology": {
+      "s0": ["rod_0", "spring_0", "spring_1", "spring_7"],
+      "s1": ["rod_0", "spring_3", "spring_4", "spring_6"],
+      "s2": ["rod_1", "spring_1", "spring_2", "spring_8"],
+      "s3": ["rod_1", "spring_4", "spring_5", "spring_7"],
+      "s4": ["rod_2", "spring_0", "spring_2", "spring_6"],
+      "s5": ["rod_2", "spring_3", "spring_5", "spring_8"]
+    }
+  },
+  "springs": [
+    {
+      "name": "spring_0",
+      "stiffness": 430.532217944529,
+      "damping": 110.77319509078816,
+      "rest_length": 7.5,
+      "end_pts": ["s0", "s4"]
+    },
+    {
+      "name": "spring_1",
+      "stiffness": 470.40819518839487,
+      "damping": 98.56324101636706,
+      "rest_length": 7.5,
+      "end_pts": ["s0", "s2"]
+    },
+    {
+      "name": "spring_2",
+      "stiffness": 526.5898052260836,
+      "damping": 85.16326854047404,
+      "rest_length": 7.5,
+      "end_pts": ["s2", "s4"]
+    },
+    {
+      "name": "spring_3",
+      "stiffness": 424.71246741290287,
+      "damping": 77.74432488918427,
+      "rest_length": 7.5,
+      "end_pts": ["s1", "s5"]
+    },
+    {
+      "name": "spring_4",
+      "stiffness": 482.89909733689916,
+      "damping": 82.30393880960767,
+      "rest_length": 7.5,
+      "end_pts": ["s1", "s3"]
+    },
+    {
+      "name": "spring_5",
+      "stiffness": 436.8675210447104,
+      "damping": 96.27624533436706,
+      "rest_length": 7.5,
+      "end_pts": ["s3", "s5"]
+    },
+    {
+      "name": "spring_6",
+      "stiffness": 963.1742449653435,
+      "damping": 107.86387842196618,
+      "rest_length": 10,
+      "end_pts": ["s4", "s1"]
+    },
+    {
+      "name": "spring_7",
+      "stiffness": 700.0000183291456,
+      "damping": 89.00421120602059,
+      "rest_length": 10,
+      "end_pts": ["s0", "s3"]
+    },
+    {
+      "name": "spring_8",
+      "stiffness": 872.0704563596345,
+      "damping": 82.664991828868,
+      "rest_length": 10,
+      "end_pts": ["s2", "s5"]
+    }
+  ],
+  "contact_params": {
+    "default": {
+      "restitution": 0.4,
+      "baumgarte": 0.001,
+      "friction": 0.9,
+      "friction_damping": 0.5889542988697164
+    }
+  }
+}

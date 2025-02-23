@@ -1,0 +1,169 @@
+{
+  "timestep_size": 0.001,
+  "num_steps": 8000,
+  "system_precision": "float64",
+  "gravity": [
+    0,
+    0,
+    -9.81
+  ],
+  "rods": [
+    {
+      "name": "rod_0",
+      "rod_type": "rod",
+      "end_pts": [[0, 3, 4.0], [9.0, -1.1, 6.0]],
+      "linear_vel": [
+        0,
+        0,
+        0
+      ],
+      "ang_vel": [
+        0,
+        0,
+        0
+      ],
+      "radius": 1.0,
+      "mass": 5.0,
+      "sites": [
+        "rod_0_spring_0",
+        "rod_0_spring_1"
+      ]
+    },
+    {
+      "name": "rod_1",
+      "rod_type": "rod",
+      "end_pts": [[1, 2, 9.0], [7.0, -2.1, 9.5]],
+      "linear_vel": [
+        0,
+        0,
+        0
+      ],
+      "ang_vel": [
+        0,
+        0,
+        0
+      ],
+      "radius": 1.0,
+      "mass": 5.0,
+      "sites": [
+        "rod_0_spring_0",
+        "rod_0_spring_1"
+      ]
+    },
+    {
+      "name": "rod_2",
+      "rod_type": "rod",
+      "end_pts": [[3, 1, 13.0], [6.0, -3.1, 13.5]],
+      "linear_vel": [
+        0,
+        0,
+        0
+      ],
+      "ang_vel": [
+        0,
+        0,
+        0
+      ],
+      "radius": 1.0,
+      "mass": 5.0,
+      "sites": [
+        "rod_0_spring_0",
+        "rod_0_spring_1"
+      ]
+    }
+  ],
+  "system_topology": {
+    "sites": {
+      "rod_1_spring_0": [
+        -2,
+        1,
+        10
+      ],
+      "rod_0_spring_0": [0, 3, 4.0],
+      "rod_1_spring_1": [
+        15,
+        3,
+        11
+      ],
+      "rod_0_spring_1": [9.0, -1.1, 6.0]
+    },
+    "topology": {
+      "rod_1_spring_0": [
+        "spring_0",
+        "rod_1"
+      ],
+      "rod_0_spring_0": [
+        "spring_0",
+        "rod_0"
+      ],
+      "rod_1_spring_1": [
+        "spring_1",
+        "rod_1"
+      ],
+      "rod_0_spring_1": [
+        "spring_1",
+        "rod_0"
+      ]
+    }
+  },
+  "springs": [
+    {
+      "name": "spring_0",
+      "stiffness": 0,
+      "damping": 0,
+      "rest_length": 5,
+      "end_pts": [
+        "rod_1_spring_0",
+        "rod_0_spring_0"
+      ]
+    },
+    {
+      "name": "spring_1",
+      "stiffness": 0,
+      "damping": 0,
+      "rest_length": 4,
+      "end_pts": [
+        "rod_1_spring_1",
+        "rod_0_spring_1"
+      ]
+    }
+  ],
+  "contact_params": {
+    "ground_rod_0": {
+      "restitution": 0.7,
+      "baumgarte": 0.1,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    },
+    "ground_rod_1": {
+      "restitution": 0.7,
+      "baumgarte": 0.1,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    },
+    "ground_rod_2": {
+      "restitution": 0.7,
+      "baumgarte": 0.1,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    },
+    "rod_0_rod_1": {
+      "restitution": 0.7,
+      "baumgarte": 0.1,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    },
+    "rod_0_rod_2": {
+      "restitution": 0.7,
+      "baumgarte": 0.1,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    },
+    "rod_1_rod_2": {
+      "restitution": 0.7,
+      "baumgarte": 0.1,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    }
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "timestep_size": 0.001,
+  "num_steps": 8000,
+  "system_precision": "float64",
+  "gravity": [
+    0,
+    0,
+    -9.81
+  ],
+  "rods": [
+    {
+      "name": "rod_0",
+      "rod_type": "rod_sphere_end_caps",
+      "end_pts": [
+        [
+          -3,    3,    4.0
+        ],
+        [
+          3,   -3,    6.0
+        ]
+      ],
+      "linear_vel": [
+        0,
+        0,
+        0
+      ],
+      "ang_vel": [
+        0,
+        0,
+        0
+      ],
+      "radius": 0.5,
+      "mass": 5.0,
+      "sphere_radius": 1.0,
+      "sphere_mass": 1.0,
+      "sites": [
+        "s0"
+      ]
+    },
+    {
+      "name": "rod_1",
+      "rod_type": "rod_sphere_end_caps",
+      "end_pts": [
+        [
+          -3.5,   0,   9.0
+        ],
+        [
+          3.5,   0.0,  9.5
+        ]
+      ],
+      "linear_vel": [
+        0,
+        0,
+        0
+      ],
+      "ang_vel": [
+        0,
+        0,
+        0
+      ],
+      "radius": 0.5,
+      "mass": 5.0,
+      "sphere_radius": 1.0,
+      "sphere_mass": 1.0,
+      "sites": [
+        "s1"
+      ]
+    },
+    {
+      "name": "rod_2",
+      "rod_type": "rod_sphere_end_caps",
+      "end_pts": [
+        [
+          -0.5, 3, 13.0
+        ],
+        [
+          -0.7,  -3,    13.5
+        ]
+      ],
+      "linear_vel": [
+        0,
+        0,
+        0
+      ],
+      "ang_vel": [
+        0,
+        0,
+        0
+      ],
+      "radius": 0.5,
+      "mass": 5.0,
+      "sphere_radius": 1.0,
+      "sphere_mass": 1.0,
+      "sites": [
+        "s2"
+      ]
+    }
+  ],
+  "system_topology": {
+    "sites": {
+      "s0": [-3,    3,    4.0],
+      "s1": [-3.5,   0,   9.0],
+      "s2": [-0.5, 3, 13.0]
+    },
+    "topology": {
+      "s0": ["rod_0", "spring_0"],
+      "s1": ["rod_1", "spring_0", "spring_1"],
+      "s2": ["rod_2", "spring_1"]
+    }
+  },
+  "springs": [
+    {
+      "name": "spring_0",
+      "stiffness": 0,
+      "damping": 0,
+      "rest_length": 7.5,
+      "end_pts": ["s0", "s1"]
+    },
+    {
+      "name": "spring_1",
+      "stiffness": 0,
+      "damping": 0,
+      "rest_length": 7.5,
+      "end_pts": ["s1", "s2"]
+    }
+  ],
+  "contact_params": {
+    "default": {
+      "restitution": 0.7,
+      "baumgarte": 0.001,
+      "friction": 0.5,
+      "friction_damping": 0.5
+    }
+  }
+}
