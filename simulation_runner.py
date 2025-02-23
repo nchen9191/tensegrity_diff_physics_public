@@ -189,16 +189,16 @@ def run_target_gaits(sim,
     rest_lens, omega_t = in_rest_lengths, in_motor_speeds
 
     while (ctrls != 0.0).any():
-        # curr_state, ctrls, rest_lens, omega_t, last_error, cum_error, done_flag = \
-        #     sim.forward(curr_state,
-        #                 target_gaits,
-        #                 dt,
-        #                 rest_lens,
-        #                 omega_t,
-        #                 last_error, cum_error, done_flag,
-        #                 min_length, range_, tol,
-        #                 first_step)
-        sim.forward(curr_state, ctrls, dt, rest_lens, omega_t, torch.zeros(18, dtype=torch.float64))
+        curr_state, ctrls, rest_lens, omega_t, last_error, cum_error, done_flag = \
+            sim.forward(curr_state,
+                        target_gaits,
+                        dt,
+                        rest_lens,
+                        omega_t,
+                        last_error, cum_error, done_flag,
+                        min_length, range_, tol,
+                        first_step)
+        # sim.forward(curr_state, ctrls, dt, rest_lens, omega_t, torch.zeros(18, dtype=torch.float64))
 
         states.append(curr_state.clone())
         rest_lengths.append(rest_lens.clone())
@@ -500,6 +500,6 @@ def edgar():
 
 
 if __name__ == '__main__':
-    torch.set_anomaly_enabled(True)
-    # with torch.no_grad():
-    run_traj()
+    # torch.set_anomaly_enabled(True)
+    with torch.no_grad():
+        run_traj()

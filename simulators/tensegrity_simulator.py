@@ -40,7 +40,7 @@ class TensegrityRobotSimulator(AbstractSimulator):
 
         self.pid = PID()
 
-    def forward(self, x, ctrls, dt, rest_lens, motor_speeds, gt_acc):
+    def forward2(self, x, ctrls, dt, rest_lens, motor_speeds, gt_acc):
         params = torch.nn.ParameterList([x, ctrls])
         x, ctrls = params
 
@@ -67,7 +67,7 @@ class TensegrityRobotSimulator(AbstractSimulator):
 
         return next_x, next_rest_lens, next_motor_speeds, x_grad, ctrls_grad
 
-    def forward2(self,
+    def forward(self,
                 curr_state,
                 target_gaits,
                 dt,
