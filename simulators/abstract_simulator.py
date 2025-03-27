@@ -165,7 +165,15 @@ class AbstractSimulator(BaseStateObject):
                                            delta_v,
                                            delta_w,
                                            toi)
-        return next_state
+
+        lin_acc_eff = (toi / dt) * lin_acc + ((dt - toi) / (dt * dt)) * delta_v
+        ang_acc_eff = (toi / dt) * ang_acc + ((dt - toi) / (dt * dt)) * delta_w
+        a_eff = torch.hstack([
+            lin_acc_eff.reshape(-1, 3),
+            ang_acc_eff.reshape(-1, 3)
+        ]).reshape(curr_state.shape[0], -1, 1)
+
+        return next_state, a_eff
 
 
 def rod_initializer(rod_type: str, rod_config: Dict, dtype: torch.dtype=torch.float64):

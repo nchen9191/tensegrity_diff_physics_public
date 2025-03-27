@@ -41,9 +41,9 @@ class TensegrityRobotSimulator(AbstractSimulator):
         self.pid = PID()
 
     def forward2(self, x, ctrls, dt, rest_lens, motor_speeds, gt_acc):
-        params = torch.nn.ParameterList([x, ctrls])
-        x, ctrls = params
-
+        # params = torch.nn.ParameterList([x, ctrls])
+        # x, ctrls = params
+        #
         self.update_state(x)
 
         for i, c in enumerate(self.tensegrity_robot.actuated_cables.values()):
@@ -55,17 +55,17 @@ class TensegrityRobotSimulator(AbstractSimulator):
         next_motor_speeds = torch.hstack([c.motor.motor_state.omega_t
                                           for c in self.tensegrity_robot.actuated_cables.values()])
 
-        old_vel = x.reshape(-1, 13, 1)[:, 7:].flatten()
-        new_vel = next_x.reshape(-1, 13, 1)[:, 7:].flatten()
+        # old_vel = x.reshape(-1, 13, 1)[:, 7:].flatten()
+        # new_vel = next_x.reshape(-1, 13, 1)[:, 7:].flatten()
 
-        acc = (new_vel - old_vel) / dt.flatten()
-        loss = ((gt_acc - acc) ** 2).mean()
-        loss.backward()
+        # acc = (new_vel - old_vel) / dt.flatten()
+        # loss = ((gt_acc - acc) ** 2).mean()
+        # loss.backward()
+        #
+        # x_grad = x.grad
+        # ctrls_grad = ctrls.grad
 
-        x_grad = x.grad
-        ctrls_grad = ctrls.grad
-
-        return next_x, next_rest_lens, next_motor_speeds, x_grad, ctrls_grad
+        return next_x, next_rest_lens, next_motor_speeds #, x_grad, ctrls_grad
 
     def forward(self,
                 curr_state,

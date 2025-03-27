@@ -38,7 +38,7 @@ def run_by_control(simulator, ctrls, dt, curr_state, start_rest_lens, start_moto
     return frames
 
 
-def batch_compute_end_pts(batch_state: torch.Tensor, rod_length=0.175) -> List[torch.Tensor]:
+def batch_compute_end_pts(batch_state: torch.Tensor, rod_length=2.95) -> List[torch.Tensor]:
     """
     Compute end pts for entire batch
 

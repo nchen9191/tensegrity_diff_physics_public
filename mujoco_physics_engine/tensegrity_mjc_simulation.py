@@ -174,6 +174,16 @@ class TensegrityMuJoCoSimulator(AbstractMuJoCoSimulator):
         end_pts = np.vstack(end_pts)
         return end_pts
 
+    def detect_ground_endcaps(self):
+        end_pts = self.get_endpts()
+        aug_end_pts = [[(i, end_pts[i]), (i + 1, end_pts[i + 1])]
+                       for i in range(0, len(end_pts), 2)]
+        aug_end_pts = [min(e, key=lambda x: x[1].flatten()[2].item()) for e in aug_end_pts]
+
+        ground_endcaps = tuple([a[0] for a in aug_end_pts])
+
+        return ground_endcaps
+
     def run(self,
             end_time: float = None,
             num_steps: int = None,
