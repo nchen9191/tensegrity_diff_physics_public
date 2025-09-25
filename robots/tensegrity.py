@@ -1,3 +1,4 @@
+from distutils.dep_util import newer
 from typing import Dict, List
 
 import torch
@@ -255,7 +256,11 @@ class TensegrityRobot:
 
         return length, x_dir
 
-    def align_prin_axis_2d(self, new_prin_axis, new_com):
+    def align_prin_axis_2d(self, new_end_pts):
+        new_end_pts = new_end_pts.reshape(-1, 6, 1)
+        new_com = (new_end_pts[:, :3] + new_end_pts[:, 3:6]) / 2.
+        new_prin_axis = new_end_pts[:, 3:] - new_end_pts[:, :3]
+
         robot_left_midpt = torch.concat([
             r.end_pts[0] for r in self.rods
         ], dim=-1).mean(dim=-1, keepdim=True)
@@ -313,25 +318,19 @@ class TensegrityRobot:
         #                                                        motor_radius,
         #                                                        motor_offset)
         attachment_sites = self.compute_cable_attachments(rod_endpts, sphere_radius)
+        # torch.set_printoptions(8)
+        # sites = sorted(attachment_sites.items(), key=lambda x: x[0][2])
+        # for k, v in sites:
+        #     print(f'"{k}": {v.flatten().numpy().tolist()}')
+            # print(f'"{k}": {" ".join([str(x) for x in v.flatten().numpy().tolist()])}')
 
-        for i, rod in enumerate(self.rods):
-            end_pts = rod_endpts[i]
-            lin_vel = zeros((1, 3, 1), ref_tensor=rod.linear_vel)
-            ang_vel = zeros((1, 3, 1), ref_tensor=rod.ang_vel)
-            rod.update_state_by_endpts(end_pts, lin_vel, ang_vel)
+        pose = self.sites_to_pose(attachment_sites)
+        pos = pose.reshape(-1, 7)[:, :3].reshape(1, -1, 1)
+        quat = pose.reshape(-1, 7)[:, 3:].reshape(1, -1, 1)
+        linvel = torch.zeros_like(pos)
+        angvel = torch.zeros_like(pos)
 
-        for k, v in attachment_sites.items():
-            self.system_topology.sites_dict[k] = v
-
-        for i, e in enumerate(rod_endpts):
-            self.system_topology.sites_dict[f"s{2 * i}"] = e[0]
-            self.system_topology.sites_dict[f"s{2 * i + 1}"] = e[1]
-
-        for rigid_body in self.rods:
-            for site in rigid_body.sites.keys():
-                world_frame_pos = self.system_topology.sites_dict[site].reshape(-1, 3, 1)
-                body_frame_pos = rigid_body.world_to_body_coords(world_frame_pos)
-                rigid_body.update_sites(site, body_frame_pos)
+        self.update_state(pos, linvel, quat, angvel)
 
     def _get_rod_ends(self, rod_end_pts, sphere_radius, rod_idxs: List = None):
         if rod_idxs is None:
@@ -420,7 +419,7 @@ class TensegrityRobot:
     def compute_cable_attachments(self, end_pts, sphere_radius):
         match_idxs = [(0, 2), (0, 4), (2, 4), (1, 3),
                       (1, 5), (3, 5), (0, 3), (1, 4), (2, 5)]
-
+        print(end_pts)
         # sort rods
         # rod_idxs, end_pts = zip(*sorted(enumerate(end_pts),
         #                                 key=lambda x: (x[1][0][:, 2] + x[1][1][:, 2]) / 2))
@@ -479,3 +478,69 @@ class TensegrityRobot:
         sites = self._pt_matching(pts, match_idxs)
 
         return sites
+
+    def sites_to_pose(self, new_sites):
+        inv_quat_fn = lambda q, v, c: torch_quaternion.rotate_vec_quat(
+            torch_quaternion.inverse_unit_quat(q), v - c)
+
+        pos, quat = [], []
+        for rod in self.rods:
+            end_pt_sites = sorted([k for k in rod.sites.keys() if len(k) <= 3],
+                                  key=lambda k: int(k[-1]))
+            rod_sites = [k for k in rod.sites.keys() if len(k) > 3]
+            curr_rod_sites = torch.vstack([self.system_topology.sites_dict[k]
+                                           for k in rod_sites])
+            new_rod_sites = torch.vstack([new_sites[k] for k in rod_sites])
+
+            curr_com = curr_rod_sites.mean(dim=0, keepdim=True)
+            new_com = new_rod_sites.mean(dim=0, keepdim=True)
+
+            curr_q = rod.quat
+
+            new_left_endpt = torch.vstack([v for k, v in new_sites.items()
+                                           if end_pt_sites[0][-1] == k[2]]
+                                          ).mean(dim=0, keepdim=True)
+            new_right_endpt = torch.vstack([v for k, v in new_sites.items()
+                                            if end_pt_sites[1][-1] == k[2]]
+                                           ).mean(dim=0, keepdim=True)
+            new_prin = new_right_endpt - new_left_endpt
+            new_prin = new_prin / new_prin.norm(dim=1, keepdim=True)
+            new_q = torch_quaternion.compute_quat_btwn_z_and_vec(new_prin)
+
+            curr_rod_sites_ = inv_quat_fn(curr_q, curr_rod_sites, curr_com)
+            new_rod_sites_ = inv_quat_fn(new_q, new_rod_sites, new_com)
+
+            # tmp_ref_sites = curr_rod_sites_.clone()
+
+            curr_rod_sites_[:, 2] = 0.
+            new_rod_sites_[:, 2] = 0.
+
+            # print(curr_rod_sites_.squeeze())
+            # print(new_rod_sites_.squeeze())
+
+            angle = torch.linalg.vecdot(curr_rod_sites_, new_rod_sites_, dim=1).unsqueeze(-1)
+            angle = angle / curr_rod_sites_.norm(dim=1, keepdim=True)
+            angle = angle / new_rod_sites_.norm(dim=1, keepdim=True)
+            angle = torch.acos(torch.clamp(angle, -1, 1))
+            # print(angle)
+            avg_angle = angle.mean(dim=0, keepdim=True) / 2.
+
+            rot_dir = torch.cross(curr_rod_sites_, new_rod_sites_, dim=1)
+            rot_dir = rot_dir / rot_dir.norm(dim=1, keepdim=True)
+            rot_dir = rot_dir.mean(dim=0, keepdim=True)
+
+            q1 = torch.hstack([torch.cos(avg_angle), rot_dir * torch.sin(avg_angle)])
+            new_quat = torch_quaternion.quat_prod(new_q, q1)
+
+            # tmp_sites = torch_quaternion.rotate_vec_quat(new_quat, tmp_ref_sites)
+            # diff = tmp_sites - new_rod_sites + new_com
+
+            pos.append(new_com)
+            quat.append(new_quat)
+
+        new_pose = torch.hstack([
+            torch.vstack(pos),
+            torch.vstack(quat)
+        ]).reshape(1, -1, 1)
+
+        return new_pose
