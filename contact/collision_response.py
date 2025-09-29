@@ -8,7 +8,7 @@ from state_objects.base_state_object import BaseStateObject
 from state_objects.primitive_shapes import Ground
 from utilities import torch_quaternion
 from utilities.inertia_tensors import body_to_world_torch
-from utilities.tensor_utils import zeros
+from utilities.tensor_utils import zeros, ones
 
 
 class ContactParameters(BaseStateObject):
@@ -93,7 +93,7 @@ class CollisionResponseGenerator(BaseStateObject):
                                   collision_detector: CollisionDetector):
         baumgarte, friction_mu, restit_coeff, friction_damping = self.get_contact_params(rigid_body1, rigid_body2)
 
-        toi = zeros((next_state1.shape[0], 1, 1), ref_tensor=next_state1)
+        toi = ones((next_state1.shape[0], 1, 1), ref_tensor=next_state1) * delta_t
 
         dummy_tensor = zeros((next_state1.shape[0], 3, 1), ref_tensor=next_state1)
         delta_v1, delta_w1 = dummy_tensor.clone(), dummy_tensor.clone()
@@ -107,60 +107,65 @@ class CollisionResponseGenerator(BaseStateObject):
                                                        rigid_body1,
                                                        rigid_body2)
 
-        for has_collision_t, contact1_t, contact2_t, normal in detection_params_t:
-            curr_state1 = torch.concat([curr_state1[:, :7], next_state1[:, 7:]], dim=1)
-            curr_state2 = torch.concat([curr_state2[:, :7], next_state2[:, 7:]], dim=1)
-            params = self.compute_contact_params(curr_state1,
-                                                 curr_state2,
-                                                 rigid_body1,
-                                                 rigid_body2,
-                                                 contact1_t,
-                                                 contact2_t,
-                                                 normal)
+        has_collision_t = torch.vstack([d[0] for d in detection_params_t]).unsqueeze(-1)
+        contact1_t = torch.vstack([d[1] for d in detection_params_t])
+        contact2_t = torch.vstack([d[2] for d in detection_params_t])
+        normal = torch.vstack([d[3] for d in detection_params_t])
 
-            mass_norm, mass_tan, rel_vel_norm, rel_vel_tan, tangent, r1, r2, inv_inertia1, inv_inertia2 = params
+        curr_state1 = torch.hstack([curr_state1[:, :7], next_state1[:, 7:]]).repeat(normal.shape[0], 1, 1)
+        curr_state2 = torch.hstack([curr_state2[:, :7], next_state2[:, 7:]]).repeat(normal.shape[0], 1, 1)
+        params = self.compute_contact_params(curr_state1,
+                                             curr_state2,
+                                             rigid_body1,
+                                             rigid_body2,
+                                             contact1_t,
+                                             contact2_t,
+                                             normal)
 
-            # Apply spring-mass
-            baum = self.baumgarte_contact_impulse(mass_norm,
-                                                  contact1_t,
-                                                  contact2_t,
-                                                  baumgarte,
-                                                  delta_t,
-                                                  normal)
-            impulse_pos = impulse_pos + baum * has_collision_t
+        mass_norm, mass_tan, rel_vel_norm, rel_vel_tan, tangent, r1, r2, inv_inertia1, inv_inertia2 = params
 
-            # Apply impulse
-            reaction_imp = self.reaction_impulse(mass_norm,
-                                                 restit_coeff,
-                                                 rel_vel_norm,
-                                                 normal)
-            impulse_vel = impulse_vel + reaction_imp * has_collision_t
+        # Apply spring-mass
+        baum = self.baumgarte_contact_impulse(mass_norm,
+                                              contact1_t,
+                                              contact2_t,
+                                              baumgarte,
+                                              delta_t,
+                                              normal)
+        impulse_pos = impulse_pos + (baum * has_collision_t).sum(dim=0, keepdim=True)
 
-            # Friction for current time step
-            impulse_normal = impulse_vel + impulse_pos
-            fric = self.friction_impulse(rel_vel_tan,
-                                         tangent,
-                                         impulse_normal,
-                                         friction_mu,
-                                         friction_damping,
-                                         mass_tan)
-            impulse_friction = impulse_friction + fric * has_collision_t
+        # Apply impulse
+        reaction_imp = self.reaction_impulse(mass_norm,
+                                             restit_coeff,
+                                             rel_vel_norm,
+                                             normal)
+        impulse_vel = impulse_vel + (reaction_imp * has_collision_t).sum(dim=0, keepdim=True)
 
-            # impulse_total = impulse_normal + impulse_friction
-            dv1, dv2, dw1, dw2 = self.compute_delta_vels(impulse_normal,
-                                                         impulse_friction,
-                                                         r1,
-                                                         r2,
-                                                         rigid_body1.mass,
-                                                         rigid_body2.mass,
-                                                         inv_inertia1,
-                                                         inv_inertia2)
-            delta_v1 = delta_v1 + dv1 * has_collision_t
-            delta_v2 = delta_v2 + dv2 * has_collision_t
-            delta_w1 = delta_w1 + dw1 * has_collision_t
-            delta_w2 = delta_w2 + dw2 * has_collision_t
+        # Friction for current time step
+        impulse_normal = impulse_vel + impulse_pos
+        fric = self.friction_impulse(rel_vel_tan,
+                                     tangent,
+                                     impulse_normal,
+                                     friction_mu,
+                                     friction_damping,
+                                     mass_tan)
+        impulse_friction = impulse_friction + (fric * has_collision_t).sum(dim=0, keepdim=True)
 
-        has_collision_t = torch.stack([d[0] for d in detection_params_t], dim=-1).max(dim=-1).values
+        # impulse_total = impulse_normal + impulse_friction
+        dv1, dv2, dw1, dw2 = self.compute_delta_vels(impulse_normal,
+                                                     impulse_friction,
+                                                     r1,
+                                                     r2,
+                                                     rigid_body1.mass,
+                                                     rigid_body2.mass,
+                                                     inv_inertia1,
+                                                     inv_inertia2)
+        delta_v1 = delta_v1 + (dv1 * has_collision_t).sum(dim=0, keepdim=True)
+        delta_v2 = delta_v2 + (dv2 * has_collision_t).sum(dim=0, keepdim=True)
+        delta_w1 = delta_w1 + (dw1 * has_collision_t).sum(dim=0, keepdim=True)
+        delta_w2 = delta_w2 + (dw2 * has_collision_t).sum(dim=0, keepdim=True)
+
+        has_collision_t = has_collision_t.max()
+        toi = toi * (~has_collision_t)
 
         # Else, Check next state collision
         detection_params_tp = collision_detector.detect(next_state1,
@@ -168,55 +173,58 @@ class CollisionResponseGenerator(BaseStateObject):
                                                         rigid_body1,
                                                         rigid_body2)
 
-        for has_collision, contact1_tp, contact2_tp, normal in detection_params_tp:
-            has_collision_tp = torch.logical_and(has_collision, ~has_collision_t)
+        has_collision_tp = torch.vstack([torch.logical_and(d[0], ~has_collision_t)
+                                         for d in detection_params_tp]).unsqueeze(-1)
+        contact1_tp = torch.vstack([d[1] for d in detection_params_tp])
+        contact2_tp = torch.vstack([d[2] for d in detection_params_tp])
+        normal = torch.vstack([d[3] for d in detection_params_tp])
 
-            params = self.compute_contact_params(next_state1,
-                                                 next_state2,
-                                                 rigid_body1,
-                                                 rigid_body2,
-                                                 contact1_tp,
-                                                 contact2_tp,
-                                                 normal)
-            mass_norm, mass_tan, rel_vel_norm, rel_vel_tan, tangent, r1, r2, inv_inertia1, inv_inertia2 = params
+        params = self.compute_contact_params(next_state1,
+                                             next_state2,
+                                             rigid_body1,
+                                             rigid_body2,
+                                             contact1_tp,
+                                             contact2_tp,
+                                             normal)
+        mass_norm, mass_tan, rel_vel_norm, rel_vel_tan, tangent, r1, r2, inv_inertia1, inv_inertia2 = params
 
-            reaction_imp = self.reaction_impulse(mass_norm,
-                                                 restit_coeff,
-                                                 rel_vel_norm,
-                                                 normal)
-            # print(has_collision_tp, impulse_vel[has_collision_tp], reaction_imp[has_collision_tp])
-            impulse_vel = impulse_vel + reaction_imp * has_collision_tp
+        reaction_imp = self.reaction_impulse(mass_norm,
+                                             restit_coeff,
+                                             rel_vel_norm,
+                                             normal)
+        # print(has_collision_tp, impulse_vel[has_collision_tp], reaction_imp[has_collision_tp])
+        impulse_vel = impulse_vel + (reaction_imp * has_collision_tp).sum(dim=0, keepdim=True)
 
-            # toi
-            pen_depth = norm(contact2_tp - contact1_tp, dim=1).unsqueeze(2)
-            zero = zeros(delta_t.shape, ref_tensor=delta_t)
-            toi += torch.clamp(delta_t * has_collision_tp + pen_depth * has_collision_tp
-                                                / (rel_vel_norm * has_collision_tp + 1e-12),
-                                                zero * has_collision_tp,
-                                                delta_t * has_collision_tp)
+        # toi
+        pen_depth = norm(contact2_tp - contact1_tp, dim=1).unsqueeze(2)
+        toi = toi + torch.clamp(
+            pen_depth * has_collision_tp / (rel_vel_norm * has_collision_tp + 1e-8),
+            torch.zeros_like(pen_depth),
+            delta_t
+        ).max(dim=0, keepdim=True).values
 
-            # Friction
-            impulse_normal = impulse_vel
-            fric = self.friction_impulse(rel_vel_tan,
-                                         tangent,
-                                         impulse_normal,
-                                         friction_mu,
-                                         friction_damping,
-                                         mass_tan)
-            impulse_friction = impulse_friction + fric * has_collision_tp
+        # Friction
+        impulse_normal = impulse_vel
+        fric = self.friction_impulse(rel_vel_tan,
+                                     tangent,
+                                     impulse_normal,
+                                     friction_mu,
+                                     friction_damping,
+                                     mass_tan)
+        impulse_friction = impulse_friction + (fric * has_collision_tp).sum(dim=0, keepdim=True)
 
-            dv1, dv2, dw1, dw2 = self.compute_delta_vels(impulse_normal,
-                                                         impulse_friction,
-                                                         r1,
-                                                         r2,
-                                                         rigid_body1.mass,
-                                                         rigid_body2.mass,
-                                                         inv_inertia1,
-                                                         inv_inertia2)
-            delta_v1 = delta_v1 + dv1 * has_collision_tp
-            delta_v2 = delta_v2 + dv2 * has_collision_tp
-            delta_w1 = delta_w1 + dw1 * has_collision_tp
-            delta_w2 = delta_w2 + dw2 * has_collision_tp
+        dv1, dv2, dw1, dw2 = self.compute_delta_vels(impulse_normal,
+                                                     impulse_friction,
+                                                     r1,
+                                                     r2,
+                                                     rigid_body1.mass,
+                                                     rigid_body2.mass,
+                                                     inv_inertia1,
+                                                     inv_inertia2)
+        delta_v1 = delta_v1 + (dv1 * has_collision_tp).sum(dim=0, keepdim=True)
+        delta_v2 = delta_v2 + (dv2 * has_collision_tp).sum(dim=0, keepdim=True)
+        delta_w1 = delta_w1 + (dw1 * has_collision_tp).sum(dim=0, keepdim=True)
+        delta_w2 = delta_w2 + (dw2 * has_collision_tp).sum(dim=0, keepdim=True)
 
         return delta_v1, delta_w1, delta_v2, delta_w2, toi
 
