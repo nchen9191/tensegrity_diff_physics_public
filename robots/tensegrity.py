@@ -419,7 +419,7 @@ class TensegrityRobot:
     def compute_cable_attachments(self, end_pts, sphere_radius):
         match_idxs = [(0, 2), (0, 4), (2, 4), (1, 3),
                       (1, 5), (3, 5), (0, 3), (1, 4), (2, 5)]
-        print(end_pts)
+        # print(end_pts)
         # sort rods
         # rod_idxs, end_pts = zip(*sorted(enumerate(end_pts),
         #                                 key=lambda x: (x[1][0][:, 2] + x[1][1][:, 2]) / 2))

@@ -1,6 +1,7 @@
 from typing import Dict, Tuple, Union, Optional
 
 import torch
+import tqdm
 from sympy.physics.quantum.operatorset import state_mapping
 
 from actuation.pid import PID
@@ -76,8 +77,8 @@ class TensegrityRobotSimulator(AbstractSimulator):
         dt_ = dt.reshape(1, 1, 1).repeat(toi_.shape[0], 1, 1)
 
         # Integrate t0 -> t_0.5
-        pre_next_lin_vel = lin_vel + lin_acc_ * toi_
-        pre_next_ang_vel = ang_vel + ang_acc_ * toi_
+        pre_next_lin_vel = lin_vel + lin_acc_ * dt_
+        pre_next_ang_vel = ang_vel + ang_acc_ * dt_
         pre_next_pos = pos + pre_next_lin_vel * toi_
         pre_next_quat = torch_quaternion.update_quat(quat, pre_next_ang_vel, toi_)
 
@@ -90,22 +91,32 @@ class TensegrityRobotSimulator(AbstractSimulator):
         # Unscale
         lin_acc = lin_acc / 10.
         contact_lin_acc = contact_lin_acc / 10.
-        next_rest_lens  = next_rest_lens / 10.
+        next_rest_lens = next_rest_lens / 10.
         next_pos = next_pos / 10.
         next_lin_vel = next_lin_vel / 10.
-        next_state = torch.hstack([next_pos, next_quat, next_lin_vel, next_ang_vel]).flatten()
+        next_state = torch.hstack([next_pos, next_quat, next_lin_vel, next_ang_vel])
+
+        # Flatten
+        lin_acc = lin_acc.flatten()
+        ang_acc = ang_acc.flatten()
+        contact_lin_acc = contact_lin_acc.flatten()
+        contact_ang_acc = contact_ang_acc.flatten()
+        toi = toi.flatten()
+        next_rest_lens = next_rest_lens.flatten()
+        next_motor_speeds = next_motor_speeds.flatten()
+        next_state = next_state.flatten()
 
         return lin_acc, ang_acc, contact_lin_acc, contact_ang_acc, toi, next_rest_lens, next_motor_speeds, next_state
 
     def forward2(self,
-                curr_state,
-                target_gaits,
-                dt,
-                rest_lens,
-                motor_speeds,
-                last_error, cum_error, done_flag,
-                min_length, range_, tol,
-                first_step):
+                 curr_state,
+                 target_gaits,
+                 dt,
+                 rest_lens,
+                 motor_speeds,
+                 last_error, cum_error, done_flag,
+                 min_length, range_, tol,
+                 first_step):
         for i, c in enumerate(self.tensegrity_robot.actuated_cables.values()):
             c.actuation_length = c._rest_length - rest_lens[:, i: i + 1]
             c.motor.motor_state.omega_t = motor_speeds[:, i: i + 1]
@@ -131,20 +142,29 @@ class TensegrityRobotSimulator(AbstractSimulator):
                          in_rest_lengths,
                          in_motor_speeds,
                          pid_params,
-                         target_gaits):
+                         target_gaits,
+                         max_steps=800):
+        # Scale
+        curr_state_ = curr_state.reshape(-1, 13, 1)
+        curr_state_[:, :3] *= 10
+        curr_state_[:, 7:10] *= 10
+        curr_state = curr_state_.reshape(1, -1, 1)
+        in_rest_lengths = 10 * in_rest_lengths.reshape(1, -1, 1)
+        in_motor_speeds = in_motor_speeds.reshape(1, -1, 1)
+
         first_step = torch.tensor(1., dtype=torch.float64)
         for i, c in enumerate(self.tensegrity_robot.actuated_cables.values()):
             c.actuation_length = c._rest_length - in_rest_lengths[:, i: i + 1]
             c.motor.motor_state.omega_t = in_motor_speeds[:, i: i + 1]
 
         min_length, range_, tol = pid_params
-        self.pid.min_length = min_length
-        self.pid.RANGE = range_
-        self.pid.tol = tol
+        self.pid.min_length = min_length.repeat(in_rest_lengths.shape[1]).reshape(-1, 1, 1)
+        self.pid.RANGE = range_.repeat(in_rest_lengths.shape[1]).reshape(-1, 1, 1)
+        self.pid.tol = tol.repeat(in_rest_lengths.shape[1]).reshape(-1, 1, 1)
 
-        last_error = torch.zeros_like(min_length)
-        cum_error = torch.zeros_like(min_length)
-        done_flag = torch.zeros_like(min_length, dtype=torch.bool)
+        last_error = torch.zeros_like(self.pid.min_length)
+        cum_error = torch.zeros_like(self.pid.min_length)
+        done_flag = torch.zeros_like(self.pid.min_length, dtype=torch.bool)
 
         ctrls = torch.ones_like(min_length)
 
@@ -153,16 +173,25 @@ class TensegrityRobotSimulator(AbstractSimulator):
         motor_speeds = [in_motor_speeds.clone()]
         controls = []
 
-        while (ctrls != 0.0).any():
+        for _ in tqdm.tqdm(range(max_steps)):
             curr_state, ctrls, rest_lens, omega_t, last_error, cum_error, done_flag = \
                 self.step_with_target_gait(curr_state, dt, target_gaits, last_error, cum_error, done_flag, first_step)
 
-            states.append(curr_state.clone())
-            rest_lengths.append(rest_lens.clone())
+            state = curr_state.reshape(-1, 13, 1).clone()
+            state[:, :3] /= 10
+            state[:, 7:10] /= 10
+            state = state.reshape(1, -1, 1)
+            rest_lens_cpy = rest_lens / 10
+
+            states.append(state)
+            rest_lengths.append(rest_lens_cpy)
             motor_speeds.append(omega_t.clone())
             controls.append(ctrls.clone())
 
             first_step = torch.tensor(0., dtype=torch.float64)
+
+            if (ctrls == 0.0).all():
+                break
 
         return states, rest_lengths, motor_speeds, controls
 
@@ -172,6 +201,7 @@ class TensegrityRobotSimulator(AbstractSimulator):
                               target_gaits: torch.Tensor,
                               last_error, cum_error, done_flag,
                               first_step):
+        target_gaits = target_gaits.reshape(-1, 1, 1)
         self.update_state(curr_state)
 
         curr_length, rest_lengths = [], []
@@ -252,8 +282,10 @@ class TensegrityRobotSimulator(AbstractSimulator):
     def compute_forces(self) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         net_spring_forces, spring_forces, acting_pts \
             = self.tensegrity_robot.compute_spring_forces()
-        gravity_forces = torch.hstack([rod.mass * self.gravity
-                                       for rod in self.tensegrity_robot.rods])
+        gravity_forces = torch.hstack([
+            rod.mass * self.gravity
+            for rod in self.tensegrity_robot.rods
+        ])
         net_forces = net_spring_forces + gravity_forces
 
         return net_forces, spring_forces, acting_pts
@@ -360,21 +392,30 @@ class TensegrityRobotSimulator(AbstractSimulator):
         return delta_v, delta_w, toi
 
     def resolve_contacts(self,
-                         pre_next_state: torch.Tensor,
+                         pre_next_state,
                          dt: Union[torch.Tensor, float],
                          delta_v: torch.Tensor,
                          delta_w: torch.Tensor,
                          toi) -> torch.Tensor:
-        rods = self.tensegrity_robot.rods
+        # reshape
+        toi = toi.reshape(-1, 1, 1)
+
+        # dt1
         pre_next_state_ = pre_next_state.reshape(-1, 13, 1)
+        next_lin_vel = pre_next_state_[:, 7:10]
+        next_ang_vel = pre_next_state_[:, 10:13]
+        next_pos = pre_next_state_[:, :3] - (dt - toi) * next_lin_vel
+        next_quat = torch_quaternion.update_quat(pre_next_state_[:, 3:7], -next_ang_vel, (dt - toi))
 
-        lin_vel = pre_next_state_[:, 7:10, ...] + delta_v
-        ang_vel = pre_next_state_[:, 10:, ...] + delta_w
-        pos = torch.vstack([r.pos for r in rods]) + dt * lin_vel - delta_v * toi
-        quat = torch_quaternion.update_quat(pre_next_state_[:, 3:7], delta_w, dt - toi)
+        # dt2
+        next_lin_vel = next_lin_vel + delta_v
+        next_ang_vel = next_ang_vel + delta_w
+        next_pos = next_pos + next_lin_vel * (dt - toi)
+        next_quat = torch_quaternion.update_quat(next_quat, next_ang_vel, dt - toi)
 
-        next_state_ = torch.hstack([pos, quat, lin_vel, ang_vel])
-        next_state = next_state_.reshape(-1, len(rods) * 13, 1)
+        next_state = torch.hstack([
+            next_pos, next_quat, next_lin_vel, next_ang_vel
+        ]).reshape(pre_next_state.shape)
 
         return next_state
 
@@ -388,7 +429,8 @@ class TensegrityRobotSimulator(AbstractSimulator):
 
         return length, x_dir
 
-    def step_edgar(self, curr_state, dt, controls):
+    def step_edgar(self, curr_state, dt, controls) \
+            -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         for i in range(controls.shape[1]):
             name = f"spring_{i}"
             control = controls[:, i: i + 1]
@@ -417,13 +459,14 @@ class TensegrityRobotSimulator(AbstractSimulator):
         # Resolve contacts
         # next_state = pre_next_state
         delta_v, delta_w, toi = self.compute_contact_deltas(pre_next_state, dt)
-        contact_lin_acc = torch.zeros_like(delta_v)
-        contact_ang_acc = torch.zeros_like(delta_w)
+        # contact_lin_acc = torch.zeros_like(delta_v)
+        # contact_ang_acc = torch.zeros_like(delta_w)
 
-        has_contact = toi.flatten() < dt.flatten()
-        dt_contact = dt - toi[has_contact]
-        contact_lin_acc[has_contact] = delta_v[has_contact] / dt_contact
-        contact_ang_acc[has_contact] = delta_w[has_contact] / dt_contact
+        # has_contact = toi.flatten() < dt.flatten()
+        dt_contact = dt - toi
+        dt_contact[dt_contact == 0.] = dt
+        contact_lin_acc = delta_v / dt_contact
+        contact_ang_acc = delta_w / dt_contact
 
         return lin_acc, ang_acc, contact_lin_acc, contact_ang_acc, toi
 
@@ -464,5 +507,3 @@ class TensegrityRobotSimulator(AbstractSimulator):
 
     def init_by_endpts(self, end_pts):
         self.tensegrity_robot.init_by_endpts(end_pts)
-
-
