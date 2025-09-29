@@ -721,7 +721,7 @@ def edgar():
                 )
             )
 
-            script_sim.save("/home/nelsonchen/Desktop/old_platform_script_sim.pt")
+            script_sim.save("old_platform_script_sim.pt")
 
         run_robot_init_stabilization(
             sim,
@@ -733,11 +733,6 @@ def edgar():
             max_time=10,
             vis=True
         )
-
-        # run_primitive()
-
-        # ctrls = torch.ones((1, 6, 1), dtype=torch.float64)
-        # script_sim.forward(start_state, ctrls, dt, rest_lengths, motor_speeds, torch.zeros(18, dtype=torch.float64))
 
 
 if __name__ == '__main__':
